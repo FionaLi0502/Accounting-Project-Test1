@@ -166,7 +166,7 @@ MIT License - See LICENSE file for details
 
 ## 👤 Author
 
-Your Name - [Your LinkedIn](https://linkedin.com/in/yourprofile)
+Yujie Li - ([https://linkedin.com/in/yourprofile](https://www.linkedin.com/in/yujie-li1996/))
 
 ## 🙏 Acknowledgments
 
