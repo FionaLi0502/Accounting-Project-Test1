@@ -314,6 +314,8 @@ def generate_pdf_report(financial_data,recon):
     buffer.seek(0)
     return buffer
 
+# Replace the generate_ai_recommendations function (lines 317-375) with this:
+
 def generate_ai_recommendations(financial_data, years):
     """Generate AI-powered recommendations using Claude"""
     try:
@@ -324,48 +326,45 @@ def generate_ai_recommendations(financial_data, years):
         opex = financial_data[latest_year]['salaries'] + financial_data[latest_year]['rent'] + financial_data[latest_year]['marketing'] + financial_data[latest_year]['it_expense']
         debt_to_equity = financial_data[latest_year]['total_liab'] / financial_data[latest_year]['total_equity'] if financial_data[latest_year]['total_equity'] > 0 else 0
         
-        prompt = f"""You are a financial analyst reviewing a company's financial statements. Analyze the following data and provide 4-6 specific, actionable recommendations:
+        prompt = f"""You are a financial analyst. Analyze this company's {latest_year} financial data and provide 4-6 specific recommendations.
 
-**{latest_year} Financial Performance:**
-
-Income Statement:
+Financial Data:
 - Revenue: ${financial_data[latest_year]['revenue']:,.0f}
-- COGS: ${financial_data[latest_year]['cogs']:,.0f}
-- Gross Profit: ${financial_data[latest_year]['gross_profit']:,.0f}
 - Gross Margin: {financial_data[latest_year]['gross_margin']:.1f}%
 - Operating Expenses: ${opex:,.0f}
-- EBIT: ${financial_data[latest_year]['ebit']:,.0f}
-- EBIT Margin: {financial_data[latest_year]['ebit_margin']:.1f}%
 - Net Income: ${financial_data[latest_year]['net_income']:,.0f}
 - Net Margin: {financial_data[latest_year]['net_margin']:.1f}%
-
-Balance Sheet:
 - Total Assets: ${financial_data[latest_year]['total_assets']:,.0f}
-- Total Liabilities: ${financial_data[latest_year]['total_liab']:,.0f}
-- Total Equity: ${financial_data[latest_year]['total_equity']:,.0f}
-- Debt-to-Equity Ratio: {debt_to_equity:.2f}x
-
-Cash Flow:
+- Debt-to-Equity: {debt_to_equity:.2f}x
 - Cash from Operations: ${financial_data[latest_year]['cffo']:,.0f}
-- Capital Expenditures: ${financial_data[latest_year]['capex']:,.0f}
-- Dividends Paid: ${financial_data[latest_year]['dividends']:,.0f}
 
-Provide recommendations in the following format:
+Provide recommendations in this exact format:
 
 ### 🎯 Key Recommendations
 
-Use markdown bullet points. Focus on:
-1. Revenue growth opportunities
-2. Cost optimization strategies
-3. Working capital management
-4. Profitability improvements
-5. Financial health and risk management
+**Revenue Growth:**
+- [One specific recommendation with numbers]
 
-Keep each recommendation to 1-2 sentences and be specific with numbers where relevant."""
+**Cost Management:**
+- [One specific recommendation with numbers]
+
+**Working Capital:**
+- [One specific recommendation with numbers]
+
+**Profitability:**
+- [One specific recommendation with numbers]
+
+**Financial Health:**
+- [One specific recommendation with numbers]
+
+**Cash Flow:**
+- [One specific recommendation with numbers]
+
+Keep each bullet to ONE clear sentence. Use actual numbers from the data."""
 
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=1500,
+            max_tokens=1200,
             messages=[{"role": "user", "content": prompt}]
         )
         
@@ -377,8 +376,8 @@ Keep each recommendation to 1-2 sentences and be specific with numbers where rel
 Could not generate AI recommendations: {str(e)}
 
 **Please check:**
-- ANTHROPIC_API_KEY is set in your .env file
-- API key starts with 'sk-ant-'
+- ANTHROPIC_API_KEY is set correctly
+- API key is valid and active
 - You have an active internet connection
 
 **Manual Analysis Suggestions:**
