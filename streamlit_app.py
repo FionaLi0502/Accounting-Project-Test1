@@ -14,15 +14,17 @@ from typing import Dict, List, Tuple, Optional
 # Import custom modules
 from validation import (normalize_column_headers, check_required_columns,
                        validate_trial_balance, validate_gl_activity,
-                       validate_common_issues, apply_auto_fixes)
+                       validate_common_issues, apply_auto_fixes,
+                       validate_strict_usd, validate_debit_credit)
 from mapping import map_accounts, get_mapping_stats
 from excel_writer import (write_financial_data_to_template, 
                           calculate_financial_statements,
                           validate_template_structure)
 from pdf_export import create_pdf_report
 from ai_summary import generate_ai_summary, summarize_validation_issues
-from sample_data import (load_sample_tb, load_sample_gl, load_random_backup_gl,
-                         get_template_path, list_available_datasets)
+from sample_data import (load_sample_tb, load_sample_gl, load_random_backup_pair,
+                         get_template_path, list_available_datasets,
+                         get_sample_tb_file, get_sample_gl_files)
 
 # Page config
 st.set_page_config(
@@ -142,25 +144,53 @@ def main():
                     st.error(f"Error: {str(e)}")
         
         with col2:
-            if st.button("📊 Use Sample Data", use_container_width=True):
+            # Download Sample Data dropdown
+            with st.expander("📊 Download Sample Data", expanded=False):
+                st.markdown("**Choose data to download:**")
+                
+                # Download Sample TB
                 try:
-                    # Load sample TB and GL
-                    st.session_state.tb_data = load_sample_tb()
-                    st.session_state.gl_data = load_sample_gl(with_txnid=True)
-                    st.session_state.has_tb = True
-                    st.session_state.has_gl = True
-                    st.success("✅ Sample data loaded!")
-                    st.rerun()
+                    tb_bytes, tb_filename = get_sample_tb_file()
+                    st.download_button(
+                        label="📥 Download Sample Trial Balance (TB) Data",
+                        data=tb_bytes,
+                        file_name=tb_filename,
+                        mime="text/csv",
+                        use_container_width=True,
+                        help="Sample Trial Balance with month-end balances"
+                    )
                 except Exception as e:
-                    st.error(f"Error loading sample data: {str(e)}")
+                    st.error(f"TB download error: {str(e)}")
+                
+                st.markdown("---")
+                
+                # Download Sample GL
+                try:
+                    gl_files = get_sample_gl_files()
+                    
+                    st.markdown("**General Ledger (GL) Activity samples:**")
+                    st.caption("TransactionID is optional; these samples include it for demonstration.")
+                    
+                    for gl_bytes, gl_filename in gl_files:
+                        label = "📥 GL with TransactionID" if "with_txnid" in gl_filename else "📥 GL without TransactionID"
+                        st.download_button(
+                            label=label,
+                            data=gl_bytes,
+                            file_name=gl_filename,
+                            mime="text/csv",
+                            use_container_width=True
+                        )
+                except Exception as e:
+                    st.error(f"GL download error: {str(e)}")
         
         if st.button("🎲 Load Random Test Dataset", use_container_width=True):
             try:
-                df, name = load_random_backup_gl()
-                st.session_state.gl_data = df
+                tb_df, gl_df, name = load_random_backup_pair()
+                st.session_state.tb_data = tb_df
+                st.session_state.gl_data = gl_df
+                st.session_state.has_tb = True
                 st.session_state.has_gl = True
-                st.session_state.has_tb = False  # Backups are GL only
-                st.info(f"📦 Loaded: {name}")
+                st.info(f"📦 Loaded TB + GL pair: {name}")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error loading random dataset: {str(e)}")
@@ -227,9 +257,9 @@ def main():
                 st.error(f"Error loading TB: {str(e)}")
     
     with col2:
-        st.subheader("GL Activity")
+        st.subheader("General Ledger (GL) Activity")
         gl_file = st.file_uploader(
-            "Upload GL Activity CSV/Excel",
+            "Upload General Ledger CSV/Excel",
             type=['csv', 'xlsx'],
             key='gl_upload',
             help="Transaction-level detail. Optional but recommended for validation."
@@ -254,6 +284,37 @@ def main():
                 
             except Exception as e:
                 st.error(f"Error loading GL: {str(e)}")
+    
+    # Sample data format example
+    st.markdown("---")
+    with st.expander("📋 Sample Data Format Example", expanded=False):
+        st.markdown("**Required columns (TB and GL have similar format):**")
+        
+        sample_data = {
+            'TxnDate': ['2024-01-31', '2024-01-31', '2024-02-15', '2024-02-15'],
+            'AccountNumber': [1000, 4000, 1100, 5000],
+            'AccountName': ['Cash', 'Revenue', 'Accounts Receivable', 'COGS'],
+            'Debit': [5000.00, 0.00, 1200.00, 800.00],
+            'Credit': [0.00, 5000.00, 0.00, 0.00],
+            'TransactionID': [1001, 1001, 1002, 1003],
+        }
+        
+        st.dataframe(pd.DataFrame(sample_data), use_container_width=True)
+        
+        st.markdown("""
+        **Column notes:**
+        - **TxnDate:** Date of transaction (required)
+        - **AccountNumber:** Account code (required)
+        - **AccountName:** Account description (required)
+        - **Debit/Credit:** Transaction amounts (required, both must be ≥ 0)
+        - **TransactionID:** Journal Entry ID (**not required for TB, optional for GL**)
+        - **Currency:** USD assumed if not specified (strict USD mode enforced)
+        
+        **Key rules:**
+        - Column names are **case-insensitive** and order-independent
+        - Extra columns are ignored
+        - Each row should be single-sided (either Debit OR Credit > 0, not both)
+        """)
     
     # Check what we have
     has_tb = st.session_state.has_tb and st.session_state.tb_data is not None
@@ -284,29 +345,49 @@ def main():
     # Validate TB if present
     if has_tb:
         st.subheader("Trial Balance Validation")
-        tb_issues = validate_trial_balance(st.session_state.tb_data)
-        tb_common_issues = validate_common_issues(st.session_state.tb_data)
-        tb_issues.extend(tb_common_issues)
-        st.session_state.tb_issues = tb_issues
-        all_issues.extend(tb_issues)
         
-        if tb_issues:
-            st.warning(f"⚠️ Found {len(tb_issues)} issue(s) in Trial Balance")
+        # Strict USD validation
+        usd_issues = validate_strict_usd(st.session_state.tb_data)
+        
+        # Debit/Credit validation
+        debit_credit_issues = validate_debit_credit(st.session_state.tb_data)
+        
+        # TB balance validation
+        tb_issues = validate_trial_balance(st.session_state.tb_data)
+        
+        # Common issues
+        tb_common_issues = validate_common_issues(st.session_state.tb_data)
+        
+        # Combine all TB issues
+        all_tb_issues = usd_issues + debit_credit_issues + tb_issues + tb_common_issues
+        st.session_state.tb_issues = all_tb_issues
+        all_issues.extend(all_tb_issues)
+        
+        # Check for critical USD issues (blocks generation)
+        has_critical_usd_error = any(issue.get('severity') == 'Critical' and issue.get('category') == 'Currency' 
+                                      for issue in all_tb_issues)
+        
+        if all_tb_issues:
+            st.warning(f"⚠️ Found {len(all_tb_issues)} issue(s) in Trial Balance")
             
-            for i, issue in enumerate(tb_issues):
+            for i, issue in enumerate(all_tb_issues):
                 severity_class = f"validation-{issue['severity'].lower()}"
                 with st.expander(f"{issue['severity']}: {issue['issue']}", expanded=False):
                     st.markdown(f"**Impact:** {issue['impact']}")
                     st.markdown(f"**Suggestion:** {issue['suggestion']}")
                     
+                    if 'detail' in issue:
+                        st.markdown(f"**Details:** {issue['detail']}")
+                    
                     if 'sample_data' in issue and issue['sample_data'] is not None:
                         st.dataframe(issue['sample_data'])
                     
-                    # Checkbox for auto-fix
-                    if issue['auto_fix']:
+                    # Checkbox for auto-fix (NOT auto-checked, user must select)
+                    # Info-only issues (like "Unusual amounts") should NOT have checkboxes
+                    if issue['auto_fix'] and issue['severity'] != 'Info':
                         key = f"tb_fix_{i}"
                         if key not in st.session_state.issue_selections:
-                            st.session_state.issue_selections[key] = True
+                            st.session_state.issue_selections[key] = False  # Default unchecked
                         
                         st.session_state.issue_selections[key] = st.checkbox(
                             "Apply this fix",
@@ -318,28 +399,48 @@ def main():
     
     # Validate GL if present
     if has_gl:
-        st.subheader("GL Activity Validation")
-        gl_issues = validate_gl_activity(st.session_state.gl_data)
-        gl_common_issues = validate_common_issues(st.session_state.gl_data)
-        gl_issues.extend(gl_common_issues)
-        st.session_state.gl_issues = gl_issues
-        all_issues.extend(gl_issues)
+        st.subheader("General Ledger (GL) Activity Validation")
         
-        if gl_issues:
-            st.warning(f"⚠️ Found {len(gl_issues)} issue(s) in GL Activity")
+        # Strict USD validation
+        gl_usd_issues = validate_strict_usd(st.session_state.gl_data)
+        
+        # Debit/Credit validation
+        gl_debit_credit_issues = validate_debit_credit(st.session_state.gl_data)
+        
+        # GL activity validation
+        gl_issues = validate_gl_activity(st.session_state.gl_data)
+        
+        # Common issues
+        gl_common_issues = validate_common_issues(st.session_state.gl_data)
+        
+        # Combine all GL issues
+        all_gl_issues = gl_usd_issues + gl_debit_credit_issues + gl_issues + gl_common_issues
+        st.session_state.gl_issues = all_gl_issues
+        all_issues.extend(all_gl_issues)
+        
+        # Check for critical USD issues
+        has_critical_usd_error_gl = any(issue.get('severity') == 'Critical' and issue.get('category') == 'Currency' 
+                                         for issue in all_gl_issues)
+        
+        if all_gl_issues:
+            st.warning(f"⚠️ Found {len(all_gl_issues)} issue(s) in GL Activity")
             
-            for i, issue in enumerate(gl_issues):
+            for i, issue in enumerate(all_gl_issues):
                 with st.expander(f"{issue['severity']}: {issue['issue']}", expanded=False):
                     st.markdown(f"**Impact:** {issue['impact']}")
                     st.markdown(f"**Suggestion:** {issue['suggestion']}")
                     
+                    if 'detail' in issue:
+                        st.markdown(f"**Details:** {issue['detail']}")
+                    
                     if 'sample_data' in issue and issue['sample_data'] is not None:
                         st.dataframe(issue['sample_data'])
                     
-                    if issue['auto_fix']:
+                    # Checkbox for auto-fix (NOT auto-checked, no checkbox for Info-only)
+                    if issue['auto_fix'] and issue['severity'] != 'Info':
                         key = f"gl_fix_{i}"
                         if key not in st.session_state.issue_selections:
-                            st.session_state.issue_selections[key] = True
+                            st.session_state.issue_selections[key] = False  # Default unchecked
                         
                         st.session_state.issue_selections[key] = st.checkbox(
                             "Apply this fix",
@@ -367,11 +468,21 @@ def main():
         
         with col3:
             if st.button("🔧 Apply Selected Fixes", type="primary", use_container_width=True):
+                # Check for blocking Critical issues (e.g., multi-currency in strict mode)
+                critical_currency_issues = [
+                    issue for issue in all_issues 
+                    if issue.get('severity') == 'Critical' and issue.get('category') == 'Currency'
+                ]
+                
+                if critical_currency_issues:
+                    st.error("❌ Cannot proceed: Multi-currency or non-USD data detected. STRICT USD MODE enforced.")
+                    return
+                
                 # Apply fixes to TB
-                if has_tb and st.session_state.tb_issues:
+                if has_tb:
                     selected_tb_fixes = []
                     for i, issue in enumerate(st.session_state.tb_issues):
-                        if issue['auto_fix']:
+                        if issue['auto_fix'] and issue['severity'] != 'Info':
                             key = f"tb_fix_{i}"
                             if st.session_state.issue_selections.get(key, False):
                                 selected_tb_fixes.append(issue['auto_fix'])
@@ -385,12 +496,15 @@ def main():
                         st.session_state.changes_log.extend(
                             [f"TB: {change}" for change in tb_changes]
                         )
+                    else:
+                        # No fixes selected, use original data
+                        st.session_state.tb_cleaned = st.session_state.tb_data
                 
                 # Apply fixes to GL
-                if has_gl and st.session_state.gl_issues:
+                if has_gl:
                     selected_gl_fixes = []
                     for i, issue in enumerate(st.session_state.gl_issues):
-                        if issue['auto_fix']:
+                        if issue['auto_fix'] and issue['severity'] != 'Info':
                             key = f"gl_fix_{i}"
                             if st.session_state.issue_selections.get(key, False):
                                 selected_gl_fixes.append(issue['auto_fix'])
@@ -404,14 +518,19 @@ def main():
                         st.session_state.changes_log.extend(
                             [f"GL: {change}" for change in gl_changes]
                         )
+                    else:
+                        # No fixes selected, use original data
+                        st.session_state.gl_cleaned = st.session_state.gl_data
                 
                 st.session_state.validation_complete = True
-                st.success("✅ Fixes applied successfully!")
                 
                 if st.session_state.changes_log:
+                    st.success("✅ Fixes applied successfully!")
                     with st.expander("View Changes"):
                         for change in st.session_state.changes_log:
                             st.write(f"• {change}")
+                else:
+                    st.info("ℹ️ No fixes selected. Proceeding with original data.")
                 
                 st.rerun()
     else:
@@ -432,12 +551,30 @@ def main():
     if st.button("🚀 Generate 3-Statement Model", type="primary", use_container_width=True):
         with st.spinner("Generating financial statements..."):
             try:
-                # Use TB data if available, otherwise GL
-                data_to_use = st.session_state.tb_cleaned if has_tb else st.session_state.gl_cleaned
-                
-                if data_to_use is None:
-                    st.error("No clean data available")
+                # CRITICAL: Use TB as source of truth when both TB and GL are present
+                # GL is used for validation only, NOT added to TB totals
+                if has_tb:
+                    data_to_use = st.session_state.tb_cleaned if st.session_state.tb_cleaned is not None else st.session_state.tb_data
+                    data_source = "Trial Balance"
+                elif has_gl:
+                    data_to_use = st.session_state.gl_cleaned if st.session_state.gl_cleaned is not None else st.session_state.gl_data
+                    data_source = "General Ledger"
+                else:
+                    st.error("❌ No data available. Please upload Trial Balance and/or General Ledger data.")
                     return
+                
+                if data_to_use is None or len(data_to_use) == 0:
+                    st.error("❌ No clean data available. This may be due to:")
+                    st.markdown("""
+                    - All rows filtered out by applied fixes
+                    - Required columns missing
+                    - All dates invalid
+                    
+                    **Next steps:** Try declining all fixes and re-validate, or re-upload your data.
+                    """)
+                    return
+                
+                st.info(f"📊 Using **{data_source}** as source of truth for financial statements")
                 
                 # Map accounts
                 mapped_data = map_accounts(data_to_use)
@@ -497,39 +634,116 @@ def main():
         
         # Income Statement
         st.subheader("📈 Income Statement")
-        is_data = []
+        
+        # Build table with years as columns, line items as rows
+        line_items = ['Revenue', 'COGS', 'Gross Profit', 'Operating Expenses', 'EBIT', 'Interest Expense', 'Tax Expense', 'Net Income']
+        is_table = {'Line Item': line_items}
+        
         for year in years:
             data = financial_data[year]
-            is_data.append({
-                'Year': year,
-                'Revenue': data.get('revenue', 0),
-                'COGS': data.get('cogs', 0),
-                'Gross Profit': data.get('revenue', 0) - data.get('cogs', 0),
-                'Operating Expenses': sum([data.get(k, 0) for k in ['distribution_expenses', 'marketing_admin', 'research_dev', 'depreciation_expense']]),
-                'Net Income': data.get('revenue', 0) - data.get('cogs', 0) - sum([data.get(k, 0) for k in ['distribution_expenses', 'marketing_admin', 'research_dev', 'depreciation_expense', 'interest_expense', 'tax_expense']])
-            })
-        st.dataframe(pd.DataFrame(is_data), use_container_width=True)
+            revenue = data.get('revenue', 0)
+            cogs = data.get('cogs', 0)
+            gross_profit = revenue - cogs
+            opex = sum([data.get(k, 0) for k in ['distribution_expenses', 'marketing_admin', 'research_dev', 'depreciation_expense']])
+            ebit = gross_profit - opex
+            interest = data.get('interest_expense', 0)
+            tax = data.get('tax_expense', 0)
+            net_income = ebit - interest - tax
+            
+            is_table[str(year)] = [revenue, cogs, gross_profit, opex, ebit, interest, tax, net_income]
+        
+        is_df = pd.DataFrame(is_table)
+        st.dataframe(is_df, use_container_width=True, hide_index=True)
         
         # Balance Sheet (if TB available)
         if has_tb:
             st.subheader("💰 Balance Sheet")
-            bs_data = []
+            
+            # Build table with years as columns, line items as rows
+            bs_line_items = ['Cash', 'Accounts Receivable', 'Inventory', 'Total Current Assets', 
+                           'PP&E (net)', 'Total Assets',
+                           'Accounts Payable', 'Accrued Liabilities', 'Total Current Liabilities',
+                           'Long-term Debt', 'Total Liabilities',
+                           'Common Stock', 'Retained Earnings', 'Total Equity']
+            
+            bs_table = {'Line Item': bs_line_items}
+            
             for year in years:
                 data = financial_data[year]
-                bs_data.append({
-                    'Year': year,
-                    'Total Assets': sum([data.get(k, 0) for k in ['cash', 'accounts_receivable', 'inventory', 'prepaid_expenses', 'other_current_assets', 'ppe_gross']]) - data.get('accumulated_depreciation', 0),
-                    'Total Liabilities': sum([data.get(k, 0) for k in ['accounts_payable', 'accrued_payroll', 'deferred_revenue', 'interest_payable', 'other_current_liabilities', 'income_taxes_payable', 'long_term_debt']]),
-                    'Total Equity': sum([data.get(k, 0) for k in ['common_stock', 'retained_earnings']])
-                })
-            st.dataframe(pd.DataFrame(bs_data), use_container_width=True)
+                cash = data.get('cash', 0)
+                ar = data.get('accounts_receivable', 0)
+                inv = data.get('inventory', 0)
+                current_assets = cash + ar + inv + data.get('prepaid_expenses', 0) + data.get('other_current_assets', 0)
+                ppe_net = data.get('ppe_gross', 0) - data.get('accumulated_depreciation', 0)
+                total_assets = current_assets + ppe_net
+                
+                ap = data.get('accounts_payable', 0)
+                accrued = data.get('accrued_payroll', 0) + data.get('other_current_liabilities', 0)
+                current_liab = ap + accrued + data.get('deferred_revenue', 0) + data.get('interest_payable', 0) + data.get('income_taxes_payable', 0)
+                ltd = data.get('long_term_debt', 0)
+                total_liab = current_liab + ltd
+                
+                stock = data.get('common_stock', 0)
+                re = data.get('retained_earnings', 0)
+                total_equity = stock + re
+                
+                bs_table[str(year)] = [cash, ar, inv, current_assets, ppe_net, total_assets,
+                                      ap, accrued, current_liab, ltd, total_liab,
+                                      stock, re, total_equity]
+            
+            bs_df = pd.DataFrame(bs_table)
+            st.dataframe(bs_df, use_container_width=True, hide_index=True)
         else:
             st.info("⚠️ Balance Sheet incomplete (Trial Balance not provided)")
         
         # Cash Flow (if multi-year TB)
         if has_tb and len(years) >= 2:
-            st.subheader("💵 Cash Flow Statement")
-            st.info("Cash Flow Statement generated using GAAP indirect method")
+            st.subheader("💵 Cash Flow Statement (GAAP Indirect Method)")
+            
+            # Build table with years as columns (skip first year, show Year 2+)
+            cf_years = years[1:]  # Cash flow requires deltas, so start from year 2
+            cf_line_items = ['Net Income', 'Depreciation & Amortization',
+                           'Change in AR', 'Change in Inventory', 'Change in AP', 'Change in Accrued Liabilities',
+                           'Cash from Operations',
+                           'CapEx', 'Cash from Investing',
+                           'Debt Issuance', 'Dividends Paid', 'Cash from Financing',
+                           'Net Change in Cash']
+            
+            cf_table = {'Line Item': cf_line_items}
+            
+            for i, year in enumerate(cf_years):
+                prev_year = years[i]
+                curr_data = financial_data[year]
+                prev_data = financial_data[prev_year]
+                
+                # Operating activities
+                net_income = curr_data.get('revenue', 0) - curr_data.get('cogs', 0) - sum([curr_data.get(k, 0) for k in ['distribution_expenses', 'marketing_admin', 'research_dev', 'depreciation_expense', 'interest_expense', 'tax_expense']])
+                depreciation = curr_data.get('depreciation_expense', 0)
+                
+                # Working capital changes
+                delta_ar = -(curr_data.get('accounts_receivable', 0) - prev_data.get('accounts_receivable', 0))
+                delta_inv = -(curr_data.get('inventory', 0) - prev_data.get('inventory', 0))
+                delta_ap = curr_data.get('accounts_payable', 0) - prev_data.get('accounts_payable', 0)
+                delta_accrued = (curr_data.get('accrued_payroll', 0) - prev_data.get('accrued_payroll', 0))
+                
+                cfo = net_income + depreciation + delta_ar + delta_inv + delta_ap + delta_accrued
+                
+                # Investing activities
+                capex = -(curr_data.get('ppe_gross', 0) - prev_data.get('ppe_gross', 0))
+                cfi = capex
+                
+                # Financing activities
+                debt_change = curr_data.get('long_term_debt', 0) - prev_data.get('long_term_debt', 0)
+                dividends = -(curr_data.get('dividends_paid', 0))
+                cff = debt_change + dividends
+                
+                net_change_cash = cfo + cfi + cff
+                
+                cf_table[str(year)] = [net_income, depreciation, delta_ar, delta_inv, delta_ap, delta_accrued,
+                                      cfo, capex, cfi, debt_change, dividends, cff, net_change_cash]
+            
+            cf_df = pd.DataFrame(cf_table)
+            st.dataframe(cf_df, use_container_width=True, hide_index=True)
         else:
             st.info("⚠️ Cash Flow Statement requires multi-year Trial Balance data")
         
