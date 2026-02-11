@@ -191,7 +191,7 @@ TxnDate,AccountNumber,AccountName,Currency,Debit,Credit
 2023-09-30,6900,Depreciation Expense,USD,938.12,0.0
 2023-09-30,7000,Interest Expense,USD,273.17,0.0
 2023-09-30,7100,Income Tax Expense,USD,145.73,0.0
-2023-10-31,1010,Cash,USD,2417.859999999997,0.0
+2023-10-31,1010,Cash,USD,2417.8600000000006,0.0
 2023-10-31,1100,Accounts Receivable,USD,11524.83,0.0
 2023-10-31,1200,Inventory,USD,0.0,17445.379999999997
 2023-10-31,1300,Prepaid Expenses,USD,1137.98,0.0
@@ -256,7 +256,7 @@ TxnDate,AccountNumber,AccountName,Currency,Debit,Credit
 2023-12-31,6900,Depreciation Expense,USD,845.58,0.0
 2023-12-31,7000,Interest Expense,USD,276.4,0.0
 2023-12-31,7100,Income Tax Expense,USD,1133.32,0.0
-2024-01-31,1010,Cash,USD,14929.34,0.0
+2024-01-31,1010,Cash,USD,14929.339999999997,0.0
 2024-01-31,1100,Accounts Receivable,USD,1789.329999999998,0.0
 2024-01-31,1200,Inventory,USD,0.0,13647.180000000002
 2024-01-31,1300,Prepaid Expenses,USD,1269.48,0.0
@@ -325,7 +325,7 @@ TxnDate,AccountNumber,AccountName,Currency,Debit,Credit
 2024-04-30,1300,Prepaid Expenses,USD,1122.08,0.0
 2024-04-30,1510,Accumulated Depreciation,USD,0.0,1014.27
 2024-04-30,2000,Accounts Payable,USD,0.0,3359.720000000001
-2024-04-30,2100,Accrued Liabilities,USD,0.0,1738.4799999999996
+2024-04-30,2100,Accrued Liabilities,USD,0.0,1738.4799999999977
 2024-04-30,2200,Sales Tax Payable,USD,96.82000000000016,0.0
 2024-04-30,2400,Income Tax Payable,USD,1197.2,0.0
 2024-04-30,3200,Dividends,USD,3225.02,0.0
@@ -341,7 +341,7 @@ TxnDate,AccountNumber,AccountName,Currency,Debit,Credit
 2024-04-30,6800,Software Subscriptions Expense,USD,871.11,0.0
 2024-04-30,6900,Depreciation Expense,USD,1014.27,0.0
 2024-04-30,7000,Interest Expense,USD,258.32,0.0
-2024-05-31,1010,Cash,USD,24927.76,0.0
+2024-05-31,1010,Cash,USD,24927.760000000002,0.0
 2024-05-31,1100,Accounts Receivable,USD,11535.1,0.0
 2024-05-31,1200,Inventory,USD,0.0,25710.1
 2024-05-31,1300,Prepaid Expenses,USD,0.0,582.4
@@ -360,13 +360,13 @@ TxnDate,AccountNumber,AccountName,Currency,Debit,Credit
 2024-05-31,6800,Software Subscriptions Expense,USD,423.09,0.0
 2024-05-31,6900,Depreciation Expense,USD,838.95,0.0
 2024-05-31,7000,Interest Expense,USD,276.67,0.0
-2024-06-30,1010,Cash,USD,304.7400000000016,0.0
+2024-06-30,1010,Cash,USD,304.74000000000524,0.0
 2024-06-30,1100,Accounts Receivable,USD,0.0,2002.130000000001
 2024-06-30,1200,Inventory,USD,0.0,5041.460000000001
 2024-06-30,1300,Prepaid Expenses,USD,0.0,580.4
 2024-06-30,1510,Accumulated Depreciation,USD,0.0,807.46
 2024-06-30,2000,Accounts Payable,USD,1590.0999999999995,0.0
-2024-06-30,2100,Accrued Liabilities,USD,273.619999999999,0.0
+2024-06-30,2100,Accrued Liabilities,USD,273.6200000000008,0.0
 2024-06-30,2200,Sales Tax Payable,USD,702.0699999999999,0.0
 2024-06-30,4001,Revenue,USD,0.0,23216.35
 2024-06-30,4010,Service Revenue,USD,0.0,2867.46
@@ -426,7 +426,7 @@ TxnDate,AccountNumber,AccountName,Currency,Debit,Credit
 2024-09-30,1500,"Property, Plant & Equipment",USD,10321.06,0.0
 2024-09-30,1510,Accumulated Depreciation,USD,0.0,892.12
 2024-09-30,2000,Accounts Payable,USD,0.0,7708.360000000001
-2024-09-30,2100,Accrued Liabilities,USD,2120.8799999999974,0.0
+2024-09-30,2100,Accrued Liabilities,USD,2120.880000000001,0.0
 2024-09-30,2200,Sales Tax Payable,USD,0.0,361.27
 2024-09-30,2400,Income Tax Payable,USD,0.0,2335.06
 2024-09-30,4001,Revenue,USD,0.0,39578.35
@@ -464,7 +464,7 @@ TxnDate,AccountNumber,AccountName,Currency,Debit,Credit
 2024-10-31,6800,Software Subscriptions Expense,USD,193.97,0.0
 2024-10-31,6900,Depreciation Expense,USD,1009.11,0.0
 2024-10-31,7000,Interest Expense,USD,266.32,0.0
-2024-11-30,1010,Cash,USD,18588.85,0.0
+2024-11-30,1010,Cash,USD,18588.849999999995,0.0
 2024-11-30,1100,Accounts Receivable,USD,0.0,3067.5300000000007
 2024-11-30,1200,Inventory,USD,0.0,8476.230000000001
 2024-11-30,1300,Prepaid Expenses,USD,0.0,599.04
