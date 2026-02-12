@@ -533,6 +533,54 @@ def apply_auto_fixes(df: pd.DataFrame, selected_fixes: List[str]) -> Tuple[pd.Da
     return df, changes
 
 
+
+
+def add_year0_snapshot(tb_df: pd.DataFrame, statement_years: int = 3) -> Tuple[pd.DataFrame, str]:
+    """
+    Create an internal Year0 opening snapshot for STRICT MODE demo usage.
+
+    Why:
+      Strict mode requires >= (statement_years + 1) distinct years in TB so the model
+      has a prior-year opening snapshot (Year0). Some demo backup sets contain only 3 years.
+      This helper creates a synthetic Year0 year-end snapshot (Dec 31 of Year0) by copying
+      the earliest snapshot in the TB and shifting its TxnDate to Year0-12-31.
+
+    Notes:
+      - This is ONLY appropriate for demo/backups. For real user uploads, require a true Year0 snapshot.
+      - The snapshot remains balanced because it's copied from an existing balanced snapshot date.
+
+    Returns:
+      (tb_df_with_year0, change_log_message)
+    """
+    if tb_df is None or len(tb_df) == 0:
+        return tb_df, "TB empty: could not add Year0 snapshot."
+
+    df = _normalize_types(tb_df)
+
+    if "TxnDate" not in df.columns or df["TxnDate"].isna().all():
+        return tb_df, "TB missing valid TxnDate: could not add Year0 snapshot."
+
+    years = sorted(df["TxnDate"].dt.year.dropna().unique())
+    if len(years) >= statement_years + 1:
+        return tb_df, "TB already has Year0 snapshot; no change."
+
+    stmt_years = years[-int(statement_years):]
+    year0 = int(stmt_years[0]) - 1
+
+    # Copy earliest snapshot date
+    first_date = df["TxnDate"].min()
+    snap = df[df["TxnDate"] == first_date].copy()
+    year0_date = pd.Timestamp(year0, 12, 31)
+    snap["TxnDate"] = year0_date
+
+    out = pd.concat([df, snap], ignore_index=True)
+
+    msg = (
+        f"Added synthetic Year0 snapshot dated {year0_date.date()} "
+        f"by copying {len(snap)} rows from earliest snapshot date {first_date.date()}."
+    )
+    return out, msg
+
 def validate_year0_opening_snapshot(tb_df: pd.DataFrame, statement_years: int = 3) -> List[str]:
     """
     Strict-mode validation: require an opening-balance Year0 snapshot in TB.

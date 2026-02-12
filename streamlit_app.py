@@ -21,6 +21,7 @@ from validation import (
     validate_gl_activity,
     apply_auto_fixes,
     validate_year0_opening_snapshot,
+    add_year0_snapshot,
 )
 from mapping import map_accounts
 from excel_writer import (
@@ -63,6 +64,7 @@ for k, default in {
     "unit_scale": 1000,
     "strict_mode": True,
     "template_type": "zero",  # 'zero' or 'demo'
+    "dataset_source": None,  # 'random' or 'upload'
 }.items():
     if k not in st.session_state:
         st.session_state[k] = default
@@ -127,6 +129,7 @@ def load_random_set():
     st.session_state["gl_name"] = gl_file
     st.session_state["tb_changes"] = []
     st.session_state["gl_changes"] = []
+    st.session_state["dataset_source"] = "random"
 
     run_validation()
 
@@ -190,12 +193,14 @@ with st.sidebar:
         st.session_state["tb_df"] = pd.read_csv(tb_up)
         st.session_state["tb_name"] = getattr(tb_up, "name", "tb.csv")
         st.session_state["tb_changes"] = []
+        st.session_state["dataset_source"] = "upload"
         run_validation()
 
     if gl_up is not None:
         st.session_state["gl_df"] = pd.read_csv(gl_up)
         st.session_state["gl_name"] = getattr(gl_up, "name", "gl.csv")
         st.session_state["gl_changes"] = []
+        st.session_state["dataset_source"] = "upload"
         run_validation()
 
     st.divider()
@@ -356,8 +361,21 @@ if st.button("Generate 3-Statement Outputs", type="primary"):
     if strict_mode:
         year0_issues = validate_year0_opening_snapshot(tb_df, statement_years=3)
         if year0_issues:
-            st.error("Strict mode: Year0 opening snapshot requirement failed:\n" + "\n".join(year0_issues))
-            st.stop()
+            # If the dataset came from the built-in random demo/backups, we can create an internal Year0 snapshot
+            # (you asked for Year0 to exist for internal use). For user uploads, we do NOT synthesize Year0.
+            if st.session_state.get("dataset_source") == "random":
+                tb_fixed, msg = add_year0_snapshot(tb_df, statement_years=3)
+                st.session_state["tb_df"] = tb_fixed
+                tb_df = tb_fixed
+                st.info(msg)
+                run_validation()
+                year0_issues = validate_year0_opening_snapshot(tb_df, statement_years=3)
+
+            if year0_issues:
+                st.error("Strict mode: Year0 opening snapshot requirement failed:
+" + "
+".join(year0_issues))
+                st.stop()
 
     # Map accounts
     tb_mapped = map_accounts(tb_df)
