@@ -9,6 +9,26 @@ from typing import Dict, List, Tuple, Optional
 from datetime import datetime
 
 
+
+def _coerce_numeric_series(s: pd.Series) -> pd.Series:
+    """Coerce a mixed-type numeric series (strings with commas, $ signs, parentheses) into floats."""
+    if s is None:
+        return s
+    if not isinstance(s, pd.Series):
+        return pd.to_numeric(s, errors='coerce')
+    # Convert to string for cleaning, but keep NaN
+    cleaned = s.astype(str).str.strip()
+    # Treat common null strings as NaN
+    cleaned = cleaned.replace({'': None, 'nan': None, 'NaN': None, 'None': None})
+    # Remove currency symbols and commas
+    cleaned = cleaned.str.replace(r'[$,]', '', regex=True)
+    # Handle parentheses as negative (e.g., (123.45))
+    cleaned = cleaned.str.replace(r'^\((.*)\)$', r'-\1', regex=True)
+    # Remove any remaining spaces
+    cleaned = cleaned.str.replace(r'\s+', '', regex=True)
+    return pd.to_numeric(cleaned, errors='coerce')
+
+
 def normalize_column_headers(df: pd.DataFrame) -> pd.DataFrame:
     """
     Normalize column headers: case-insensitive, trim spaces
@@ -216,7 +236,33 @@ def validate_gl_activity(df: pd.DataFrame,
         })
         return issues
     
-    # Check if TransactionID exists and has sufficient data
+    
+
+# Normalize types for validation (prevents string vs numeric issues)
+df = normalize_column_headers(df)
+if 'TxnDate' in df.columns:
+    df['TxnDate'] = pd.to_datetime(df['TxnDate'], errors='coerce')
+for col in ['Debit', 'Credit', 'AccountNumber', 'Balance']:
+    if col in df.columns:
+        df[col] = _coerce_numeric_series(df[col])
+
+# If Debit/Credit couldn't be parsed, fail loudly (otherwise sums may treat NaN as 0)
+if 'Debit' in df.columns and 'Credit' in df.columns:
+    bad_amt = df['Debit'].isna() | df['Credit'].isna()
+    bad_amt_count = int(bad_amt.sum())
+    if bad_amt_count > 0:
+        issues.append({
+            'severity': 'Critical',
+            'category': 'Parsing',
+            'issue': f'{bad_amt_count} row(s) have non-numeric Debit/Credit after parsing',
+            'impact': 'GL balancing checks may be invalid',
+            'suggestion': 'Clean Debit/Credit formatting (remove currency symbols, commas, parentheses) or ensure valid numbers.',
+            'auto_fix': 'Attempted numeric coercion; remaining rows require upstream cleaning.',
+            'affected_rows': df.loc[bad_amt].index.tolist()[:50],
+            'total_affected': bad_amt_count,
+        })
+
+# Check if TransactionID exists and has sufficient data
     has_txnid = 'TransactionID' in df.columns
     
     if has_txnid:
@@ -435,66 +481,45 @@ def validate_common_issues(df: pd.DataFrame) -> List[Dict]:
 
 def apply_auto_fixes(df: pd.DataFrame, 
                      selected_fixes: List[str]) -> Tuple[pd.DataFrame, List[str]]:
-    """
-    Apply selected auto-fixes to the data
-    
-    Args:
-        df: DataFrame to fix
-        selected_fixes: List of fix names to apply
-    
-    Returns:
-        (fixed_df, change_log)
-    """
+    """Apply selected auto-fixes to TB/GL data safely (handles strings/dates/numbers)."""
     df = df.copy()
-    # Normalize headers and types once, so fixes don't crash on strings
     df = normalize_column_headers(df)
+
+    # Normalize date column
     if 'TxnDate' in df.columns:
         df['TxnDate'] = pd.to_datetime(df['TxnDate'], errors='coerce')
-    for col in ['AccountNumber', 'Debit', 'Credit']:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    changes = []
-    
-    if 'remove_missing_dates' in selected_fixes:
+    # Normalize numeric columns commonly present
+    for col in ['AccountNumber', 'Debit', 'Credit', 'Balance']:
+        if col in df.columns:
+            df[col] = _coerce_numeric_series(df[col])
+
+    changes: List[str] = []
+
+    if 'remove_missing_dates' in selected_fixes and 'TxnDate' in df.columns:
         before = len(df)
         df = df[df['TxnDate'].notna()]
         removed = before - len(df)
         if removed > 0:
             changes.append(f'Removed {removed} rows with missing dates')
-    
-    if 'map_unclassified' in selected_fixes:
+
+    if 'remove_future_dates' in selected_fixes and 'TxnDate' in df.columns:
+        before = len(df)
+        now = pd.Timestamp.now()
+        df = df[df['TxnDate'] <= now]
+        removed = before - len(df)
+        if removed > 0:
+            changes.append(f'Removed {removed} rows with future dates')
+
+    if 'map_unclassified' in selected_fixes and 'AccountNumber' in df.columns:
         missing = df['AccountNumber'].isna()
-        count = missing.sum()
-        df.loc[missing, 'AccountNumber'] = 9999
+        count = int(missing.sum())
         if count > 0:
-            changes.append(f'Mapped {count} entries to Unclassified (9999)')
-    
-    if 'fix_account_numbers' in selected_fixes:
-        invalid = (df['AccountNumber'] < 0) | (df['AccountNumber'] > 99999)
-        count = invalid.sum()
-        df.loc[invalid & (df['AccountNumber'] < 0), 'AccountNumber'] = \
-            df.loc[invalid & (df['AccountNumber'] < 0), 'AccountNumber'].abs()
-        if count > 0:
-            changes.append(f'Fixed {count} invalid account numbers')
-    
-    if 'remove_duplicates' in selected_fixes and 'TransactionID' in df.columns:
-        before = len(df)
-        df = df.drop_duplicates(subset=['TransactionID'], keep='first')
-        removed = before - len(df)
-        if removed > 0:
-            changes.append(f'Removed {removed} duplicate transactions')
-    
-    if 'remove_future_dates' in selected_fixes:
-        before = len(df)
-        df = df[df['TxnDate'].notna() & (df['TxnDate'] <= datetime.now())]
-        removed = before - len(df)
-        if removed > 0:
-            changes.append(f'Removed {removed} future-dated transactions')
-    
+            df.loc[missing, 'AccountNumber'] = 9999
+            changes.append(f'Mapped {count} missing AccountNumber to 9999 (Unclassified)')
+
+    # Ensure Debit/Credit not null for GL rows if columns exist (keep NaN—validator will flag)
     return df, changes
-
-
 def validate_year0_opening_snapshot(tb_df: pd.DataFrame, statement_years: int = 3) -> List[str]:
     '''
     Strict-mode validation: require an opening-balance Year0 snapshot in TB.

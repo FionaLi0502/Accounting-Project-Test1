@@ -3,8 +3,6 @@
 import streamlit as st
 import pandas as pd
 import openpyxl
-import io
-import zipfile
 import random
 
 from validation import validate_trial_balance, validate_gl_activity, apply_auto_fixes
@@ -21,67 +19,66 @@ st.caption("Upload a Trial Balance (BS snapshot) and/or GL activity (IS activity
 ALL_AUTO_FIXES = ["fix_account_numbers", "remove_missing_dates", "remove_future_dates", "remove_duplicates", "map_unclassified"]
 
 with st.sidebar:
-    st.header("Demo / downloads")
+    
+st.header("Demo data")
 
-    # 1) Download Sample Financial Model (Excel template)
-    try:
-        demo_template_path = get_template_path(template_type='demo')
-        with open(demo_template_path, "rb") as f:
-            st.download_button(
-                label="Download Sample Financial Model (Excel)",
-                data=f.read(),
-                file_name="Financial_Model_SAMPLE_DEMO_USD_thousands_GAAP.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-    except Exception as e:
-        st.warning(f"Template not found: {e}")
-
-    st.divider()
-
-    # 2) Load Random Sample Set (TB+GL together)
-    def _load_random_backup_set():
-        year_ranges = [(2020, 2022), (2021, 2023), (2022, 2024), (2023, 2025), (2024, 2026)]
-        y0, y1 = random.choice(year_ranges)
-        tb_file = f"backup_tb_{y0}_{y1}.csv"
-        gl_file = f"backup_gl_{y0}_{y1}_with_txnid.csv"
-        tb = pd.read_csv(get_sample_data_path(tb_file))
-        gl = pd.read_csv(get_sample_data_path(gl_file))
-        return tb, gl, tb_file, gl_file
-
-    if st.button("Load Random Sample Set (TB + GL, 3 years)"):
-        try:
-            tb, gl, tb_name, gl_name = _load_random_backup_set()
-            st.session_state["tb_df"] = tb
-            st.session_state["gl_df"] = gl
-            st.session_state["tb_name"] = tb_name
-            st.session_state["gl_name"] = gl_name
-            st.success(f"Loaded: {tb_name} + {gl_name}")
-        except Exception as e:
-            st.error(f"Could not load sample set: {e}")
-
-    # 3) Download Sample Dataset (the currently loaded TB+GL set)
-    tb_loaded = st.session_state.get("tb_df")
-    gl_loaded = st.session_state.get("gl_df")
-    if tb_loaded is not None and gl_loaded is not None:
-        tb_name = st.session_state.get("tb_name", "sample_tb.csv")
-        gl_name = st.session_state.get("gl_name", "sample_gl.csv")
-
-        zip_buf = io.BytesIO()
-        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(tb_name, tb_loaded.to_csv(index=False))
-            zf.writestr(gl_name, gl_loaded.to_csv(index=False))
-        zip_buf.seek(0)
-
+# 1) Download Sample Financial Model (template demo)
+try:
+    demo_model_path = get_template_path("Financial_Model_SAMPLE_DEMO_USD_thousands_GAAP.xlsx")
+    with open(demo_model_path, "rb") as f:
         st.download_button(
-            label="Download Sample Dataset (TB + GL ZIP)",
-            data=zip_buf.getvalue(),
-            file_name="sample_dataset_TB_GL.zip",
-            mime="application/zip",
+            "Download Sample Financial Model",
+            data=f,
+            file_name="Financial_Model_SAMPLE_DEMO_USD_thousands_GAAP.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
         )
-    else:
-        st.info("Load a random sample set first to enable dataset download.")
+except Exception as e:
+    st.caption(f"Sample model not found: {e}")
 
-    st.divider()
+# 2) Download current random dataset (TB+GL) if loaded
+def _zip_bytes_from_dfs(tb_df, gl_df, tb_name="tb.csv", gl_name="gl.csv"):
+    import io, zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
+        if tb_df is not None:
+            z.writestr(tb_name, tb_df.to_csv(index=False))
+        if gl_df is not None:
+            z.writestr(gl_name, gl_df.to_csv(index=False))
+    buf.seek(0)
+    return buf.getvalue()
+
+if st.session_state.get('tb_df') is not None and st.session_state.get('gl_df') is not None:
+    tb_name = st.session_state.get('tb_name', 'tb.csv')
+    gl_name = st.session_state.get('gl_name', 'gl.csv')
+    st.download_button(
+        "Download Sample Dataset (TB + GL)",
+        data=_zip_bytes_from_dfs(st.session_state['tb_df'], st.session_state['gl_df'], tb_name, gl_name),
+        file_name=f"sample_dataset_{tb_name.replace('.csv','')}_{gl_name.replace('.csv','')}.zip",
+        mime="application/zip",
+        use_container_width=True,
+    )
+else:
+    st.caption("Load a random sample set to enable dataset download.")
+
+# 3) Load Random Sample Set (TB + GL together)
+if st.button("Load Random Sample Set (TB + GL, 3 years)", use_container_width=True):
+    # Pick a matching year range so TB+GL always align
+    ranges = ["2020_2022","2021_2023","2022_2024","2023_2025","2024_2026"]
+    rng = random.choice(ranges)
+    tb_file = f"backup_tb_{rng}.csv"
+    gl_file = f"backup_gl_{rng}_with_txnid.csv"
+
+    tb_df = pd.read_csv(get_sample_data_path(tb_file))
+    gl_df = pd.read_csv(get_sample_data_path(gl_file))
+
+    st.session_state['tb_df'] = tb_df
+    st.session_state['gl_df'] = gl_df
+    st.session_state['tb_name'] = tb_file
+    st.session_state['gl_name'] = gl_file
+    st.success(f"Loaded: {tb_file} + {gl_file}")
+
+st.divider()
     st.header("Template")
     template_choice = st.selectbox("Excel template", ["ZERO (processing)", "SAMPLE (demo)"])
     template_type = 'zero' if template_choice.startswith('ZERO') else 'demo'
@@ -134,31 +131,84 @@ def strict_category_check(mapped_df: pd.DataFrame, required: set, dataset_name: 
     return []
 
 if st.button("Generate 3-Statement Outputs", type="primary"):
-    if tb_df is None or gl_df is None:
-        st.error("Please provide BOTH TB and GL as a set (upload both files, or click \"Load Random Sample Set\").")
+    if tb_df is None and gl_df is None:
+        st.error("Please upload at least one dataset (TB and/or GL).")
         st.stop()
 
     # Auto-fix common issues
     if tb_df is not None:
         tb_df, tb_changes = apply_auto_fixes(tb_df, selected_fixes=ALL_AUTO_FIXES)
-        if tb_changes:
-            st.info('TB auto-fixes applied: ' + '; '.join(tb_changes))
     if gl_df is not None:
         gl_df, gl_changes = apply_auto_fixes(gl_df, selected_fixes=ALL_AUTO_FIXES)
-        if gl_changes:
-            st.info('GL auto-fixes applied: ' + '; '.join(gl_changes))
 
-    # Validate basic structure
-    issues = []
-    if tb_df is not None:
-        for it in validate_trial_balance(tb_df):
-            issues.append(f"TB [{it.get('severity','')}]: {it.get('issue','')}")
-    if gl_df is not None:
-        for it in validate_gl_activity(gl_df):
-            issues.append(f"GL [{it.get('severity','')}]: {it.get('issue','')}")
+    
+# Validate basic structure (always show a Validation section)
+issues_tb = validate_trial_balance(tb_df) if tb_df is not None else []
+issues_gl = validate_gl_activity(gl_df) if gl_df is not None else []
 
-    if issues:
-        st.error("Validation issues found:\n" + "\n".join(issues))
+# Flatten for summary banner
+def _summarize(issues_list):
+    crit = sum(1 for x in issues_list if str(x.get('severity','')).lower() == 'critical')
+    warn = sum(1 for x in issues_list if str(x.get('severity','')).lower() == 'warning')
+    info = sum(1 for x in issues_list if str(x.get('severity','')).lower() == 'info')
+    other = len(issues_list) - crit - warn - info
+    return crit, warn, info, other
+
+tb_crit, tb_warn, tb_info, tb_other = _summarize(issues_tb)
+gl_crit, gl_warn, gl_info, gl_other = _summarize(issues_gl)
+
+# Show banner if anything found
+if (issues_tb or issues_gl):
+    parts = []
+    if issues_tb:
+        parts.append(f"TB [Critical]: {tb_crit}  [Warning]: {tb_warn}  [Info]: {tb_info}")
+    if issues_gl:
+        parts.append(f"GL [Critical]: {gl_crit}  [Warning]: {gl_warn}  [Info]: {gl_info}")
+    st.error("Validation issues found: " + " | ".join(parts))
+
+with st.expander("Validation details", expanded=True):
+    if tb_df is None:
+        st.caption("TB not loaded.")
+    else:
+        st.subheader("Trial Balance (TB)")
+        if 'tb_changes' in locals() and tb_changes:
+            st.caption("Auto-fixes applied: " + " | ".join(tb_changes))
+        if not issues_tb:
+            st.success("No TB validation issues.")
+        else:
+            for it in issues_tb[:200]:
+                sev = it.get('severity','')
+                msg = it.get('issue','')
+                cat = it.get('category','')
+                sugg = it.get('suggestion','')
+                st.write(f"**{sev}** — {cat}: {msg}")
+                if sugg:
+                    st.caption(f"Suggestion: {sugg}")
+
+    st.divider()
+
+    if gl_df is None:
+        st.caption("GL not loaded.")
+    else:
+        st.subheader("General Ledger (GL)")
+        if 'gl_changes' in locals() and gl_changes:
+            st.caption("Auto-fixes applied: " + " | ".join(gl_changes))
+        if not issues_gl:
+            st.success("No GL validation issues.")
+        else:
+            for it in issues_gl[:200]:
+                sev = it.get('severity','')
+                msg = it.get('issue','')
+                cat = it.get('category','')
+                sugg = it.get('suggestion','')
+                st.write(f"**{sev}** — {cat}: {msg}")
+                if sugg:
+                    st.caption(f"Suggestion: {sugg}")
+
+# Stop if strict mode and any Critical issues exist
+if strict_mode:
+    has_critical = any(str(x.get('severity','')).lower() == 'critical' for x in (issues_tb + issues_gl))
+    if has_critical:
         st.stop()
 # Mapping
     tb_mapped = map_accounts(tb_df) if tb_df is not None else None
