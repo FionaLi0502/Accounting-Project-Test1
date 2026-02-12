@@ -181,7 +181,16 @@ def _compute_template_preview_sections(financial_data: dict, template_path: str,
     def cfi(y): return v(y,"capex")
     def cff(y): return v(y,"stock_issuance") + (-v(y,"dividends")) + v(y,"delta_debt")
     def net_change_cash(y): return cfo(y) + cfi(y) + cff(y)
-    def begin_cash(y): return v(y,"beginning_cash")
+    def begin_cash(y):
+        bc = v(y, "beginning_cash")
+        if bc != 0:
+            return bc
+        # Derive beginning cash from prior-year cash (Year0 for first statement year)
+        if y in stmt_years:
+            idx = stmt_years.index(y)
+            prev = year0 if idx == 0 else stmt_years[idx - 1]
+            return v(prev, "cash")
+        return 0.0
     def end_cash(y):
         # prefer key if exists, else compute
         ec = v(y,"cash")

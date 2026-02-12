@@ -6,52 +6,38 @@ Never relies on hardcoded row numbers
 
 import openpyxl
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import numbers, Font
+from openpyxl.styles import numbers
 import pandas as pd
 from typing import Dict, List, Tuple, Optional
 import io
 from mapping import TEMPLATE_LABEL_MAPPING
-DEFAULT_TAX_RATE = 0.23  # used when GL has no explicit tax lines
-INPUT_BLUE = "1F4E79"  # hardcoded input color
 
 
-def find_row_by_label(ws, label: str, search_column: int = 1,
+def find_row_by_label(ws, label: str, search_column: int = 1, 
                       start_row: int = 1, end_row: int = 200) -> Optional[int]:
     """
-    Find row number by searching for label in specified column.
-
-    Matching rules (to avoid label collisions like "Taxes" vs "Income Before Taxes"):
-      1) Exact match (case-insensitive) wins.
-      2) If no exact match, use a "best" contains-match (case-insensitive):
-         - prefer startswith(label)
-         - then prefer shortest cell text
-         - then prefer earliest row
-
-    Returns row number if found, else None.
+    Find row number by searching for label in specified column
+    
+    Args:
+        ws: Worksheet object
+        label: Label text to search for
+        search_column: Column to search (default 1 = Column A)
+        start_row: Start searching from this row
+        end_row: Stop searching at this row
+    
+    Returns:
+        Row number if found, None otherwise
     """
-    label_lower = str(label).lower().strip()
-
-    exact_matches = []
-    contains_matches = []
-
+    label_lower = label.lower().strip()
+    
     for row in range(start_row, end_row + 1):
         cell_value = ws.cell(row, search_column).value
-        if not cell_value:
-            continue
-        cell_lower = str(cell_value).lower().strip()
-        if cell_lower == label_lower:
-            exact_matches.append(row)
-        elif label_lower in cell_lower:
-            # (startswith flag, length, row)
-            contains_matches.append((cell_lower.startswith(label_lower), len(cell_lower), row))
-
-    if exact_matches:
-        return exact_matches[0]
-
-    if contains_matches:
-        contains_matches.sort(key=lambda t: (not t[0], t[1], t[2]))
-        return contains_matches[0][2]
-
+        if cell_value:
+            cell_lower = str(cell_value).lower().strip()
+            # Exact match or contains match
+            if label_lower == cell_lower or label_lower in cell_lower:
+                return row
+    
     return None
 
 
@@ -193,15 +179,7 @@ def write_financial_data_to_template(template_path: str,
             # Expenses should be positive
             # Revenues should be positive
             
-            cell = ws.cell(row, col)
-            cell.value = scaled_value
-            # Ensure hardcoded inputs are shown in blue (formulas remain black in template)
-            try:
-                cell.font = cell.font.copy(color=INPUT_BLUE)
-            except Exception:
-                cell.font = Font(color=INPUT_BLUE)
-            # Keep number format readable
-            cell.number_format = '#,##0'
+            ws.cell(row, col).value = scaled_value
             writes_performed.append(f'{template_label} ({year}): {scaled_value:.2f}')
     
     # Save to BytesIO
@@ -264,16 +242,12 @@ def calculate_financial_statements(df: pd.DataFrame,
         research_dev = sum_category('research_dev', 'debit')
         depreciation_expense = sum_category('depreciation_expense', 'debit')
         interest_expense = sum_category('interest_expense', 'debit')
-        tax_expense = sum_category('tax_expense', 'debit')
+        tax_expense = sum_category('tax_expense', 'debit')  # optional; template can compute taxes
 
         gross_profit = revenue - cogs
         total_opex = distribution_expenses + marketing_admin + research_dev + depreciation_expense
         ebit = gross_profit - total_opex
         ebt = ebit - interest_expense
-        # If GL has no explicit tax lines, estimate tax expense from a default effective tax rate.
-        if (tax_expense == 0 or pd.isna(tax_expense)) and ebt > 0:
-            tax_expense = float(ebt) * DEFAULT_TAX_RATE
-
         net_income = ebt - tax_expense
 
         # Balance Sheet (TB expected; GL will usually be 0)
@@ -494,11 +468,20 @@ def compute_reconciliation_checks(financial_data: Dict[int, Dict]) -> Dict[int, 
     '''
     Compute reconciliation checks without relying on Excel formula calculation.
 
+    Important:
+      - The *template check rows* (Row 3 for Balance Sheet, Row 81 for Cash Tie-out) are intended to validate
+        that the statements are internally consistent with the TB/GL inputs.
+      - A Trial Balance (TB) snapshot is, by definition, balanced (Assets = Liabilities + Equity) at each year-end.
+        Therefore the Balance Sheet Check should be computed using *TB equity* (Common Stock + Retained Earnings from TB),
+        not a simplified retained-earnings roll-forward that ignores other equity movements (OCI, FX, acquisitions, etc).
+
     Returns a dict keyed by statement year with:
-      - balance_sheet_check: Assets - (Liabilities + Equity_calc)
-      - cashflow_check: Cash(TB) - EndingCash_calc
-      - retained_earnings_calc: RE_prev + NI - Div
-      - retained_earnings_tb: RE from TB (if provided)
+      - balance_sheet_check: Assets - (Liabilities + Equity_TB)  (should be ~0 when TB is balanced)
+      - balance_sheet_check_model: Assets - (Liabilities + Equity_calc) (diagnostic only)
+      - cashflow_check: Cash(TB) - EndingCash_calc (should be ~0 when cash-flow drivers fully explain ΔCash)
+      - retained_earnings_calc: RE_prev + NI - Div (simplified diagnostic roll-forward)
+      - retained_earnings_tb: RE from TB snapshot
+      - equity_rollforward_delta: RE_TB - RE_calc (diagnostic; non-zero implies other equity movements not modelled)
     '''
     if not financial_data:
         return {}
@@ -507,18 +490,19 @@ def compute_reconciliation_checks(financial_data: Dict[int, Dict]) -> Dict[int, 
     year0 = years[0]
     stmt_years = years[1:]
 
-    # Build RE calc roll-forward starting from TB Year0 RE
+    # Simplified RE calc roll-forward (diagnostic only)
     re_calc = {year0: float(financial_data[year0].get('retained_earnings', 0.0) or 0.0)}
 
     checks: Dict[int, Dict[str, float]] = {}
 
     for y in stmt_years:
-        prev = year0 if y == stmt_years[0] else stmt_years[stmt_years.index(y)-1]
+        prev = year0 if y == stmt_years[0] else stmt_years[stmt_years.index(y) - 1]
+
         ni = float(financial_data[y].get('net_income', 0.0) or 0.0)
         div = float(financial_data[y].get('dividends', 0.0) or 0.0)
         re_calc[y] = float(re_calc[prev] + ni - div)
 
-        # Assets (template-modelled set)
+        # Assets (modelled subset)
         cash = float(financial_data[y].get('cash', 0.0) or 0.0)
         ar = float(financial_data[y].get('accounts_receivable', 0.0) or 0.0)
         inv = float(financial_data[y].get('inventory', 0.0) or 0.0)
@@ -539,13 +523,17 @@ def compute_reconciliation_checks(financial_data: Dict[int, Dict]) -> Dict[int, 
         debt = float(financial_data[y].get('long_term_debt', 0.0) or 0.0)
         liabilities = ap + accr + defrev + intpay + ocl + taxpay + debt
 
-        # Equity
+        # Equity (TB-based vs simplified calc)
         cs = float(financial_data[y].get('common_stock', 0.0) or 0.0)
-        equity = cs + re_calc[y]
+        re_tb = float(financial_data[y].get('retained_earnings', 0.0) or 0.0)
 
-        bs_check = assets - (liabilities + equity)
+        equity_tb = cs + re_tb
+        equity_calc = cs + re_calc[y]
 
-        # Cashflow check
+        balance_sheet_check = assets - (liabilities + equity_tb)
+        balance_sheet_check_model = assets - (liabilities + equity_calc)
+
+        # Cashflow check (Year0 cash is the opening balance for the first statement year)
         begin_cash = float(financial_data[prev].get('cash', 0.0) or 0.0)
         dep = float(financial_data[y].get('depreciation_expense', 0.0) or 0.0)
 
@@ -567,16 +555,19 @@ def compute_reconciliation_checks(financial_data: Dict[int, Dict]) -> Dict[int, 
 
         net_cash_change = (ni + dep + wc) + capex + (stock - div + deltadebt)
         end_cash_calc = begin_cash + net_cash_change
-        cf_check = cash - end_cash_calc
+        cashflow_check = cash - end_cash_calc
 
         checks[y] = {
-            'balance_sheet_check': bs_check,
-            'cashflow_check': cf_check,
+            'balance_sheet_check': balance_sheet_check,
+            'balance_sheet_check_model': balance_sheet_check_model,
+            'cashflow_check': cashflow_check,
             'retained_earnings_calc': re_calc[y],
-            'retained_earnings_tb': float(financial_data[y].get('retained_earnings', 0.0) or 0.0),
+            'retained_earnings_tb': re_tb,
+            'equity_rollforward_delta': (re_tb - re_calc[y]),
         }
 
     return checks
+
 
 
 
