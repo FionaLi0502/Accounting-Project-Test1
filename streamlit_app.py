@@ -29,7 +29,7 @@ from excel_writer import (
     calculate_financial_statements,
     write_financial_data_to_template,
 )
-from sample_data import get_sample_data_path, get_template_path
+from sample_data import get_template_path, load_random_backup_set, list_backup_sets
 
 
 # ----------------------------
@@ -110,18 +110,15 @@ def run_validation():
 
 
 def load_random_set():
-    """Load matched TB + GL backup sets by choosing one year-range and loading both files."""
-    year_ranges = [(2020, 2022), (2021, 2023), (2022, 2024), (2023, 2025), (2024, 2026)]
-    import random
-    y0, y1 = random.choice(year_ranges)
-    tb_file = f"backup_tb_{y0}_{y1}.csv"
-    gl_file = f"backup_gl_{y0}_{y1}_with_txnid.csv"
+    """Load a random matched TB + GL backup pack (A1 policy: packs must exist)."""
+    try:
+        tb_df, gl_df, dataset_name = load_random_backup_set(with_txnid=True)
+    except FileNotFoundError as e:
+        st.error(str(e))
+        return
 
-    tb_path = get_sample_data_path(tb_file)
-    gl_path = get_sample_data_path(gl_file)
-
-    tb_df = pd.read_csv(tb_path)
-    gl_df = pd.read_csv(gl_path)
+    tb_file = f"backup_tb_{dataset_name}.csv"
+    gl_file = f"backup_gl_{dataset_name}_with_txnid.csv"
 
     st.session_state["tb_df"] = tb_df
     st.session_state["gl_df"] = gl_df
@@ -163,8 +160,13 @@ with st.sidebar:
         st.caption(f"Could not load demo template: {e}")
 
     # A3) Load random sample set (TB+GL together)
-    if st.button("Load Random Sample Set (TB + GL, 3 years)"):
-        load_random_set()
+    available_sets = list_backup_sets(require_with_txnid=True)
+    if not available_sets:
+        st.warning("No backup sample packs found in assets/sample_data. Add files like backup_tb_2020_2022.csv and backup_gl_2020_2022_with_txnid.csv.")
+        st.button("Load Random Sample Set (TB + GL backup pack)", disabled=True)
+    else:
+        if st.button("Load Random Sample Set (TB + GL backup pack)"):
+            load_random_set()
 
     # A2) Download current dataset (TB+GL zip)
     if st.session_state["tb_df"] is not None and st.session_state["gl_df"] is not None:
@@ -372,9 +374,7 @@ if st.button("Generate 3-Statement Outputs", type="primary"):
                 year0_issues = validate_year0_opening_snapshot(tb_df, statement_years=3)
 
             if year0_issues:
-                st.error("Strict mode: Year0 opening snapshot requirement failed:
-" + "
-".join(year0_issues))
+                st.error("Strict mode: Year0 opening snapshot requirement failed:\n" + "\n".join(year0_issues))
                 st.stop()
 
     # Map accounts

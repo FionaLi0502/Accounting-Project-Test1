@@ -11,33 +11,46 @@ import pandas as pd
 from typing import Dict, List, Tuple, Optional
 import io
 from mapping import TEMPLATE_LABEL_MAPPING
+DEFAULT_TAX_RATE = 0.23  # used when GL has no explicit tax lines
 
 
-def find_row_by_label(ws, label: str, search_column: int = 1, 
+def find_row_by_label(ws, label: str, search_column: int = 1,
                       start_row: int = 1, end_row: int = 200) -> Optional[int]:
     """
-    Find row number by searching for label in specified column
-    
-    Args:
-        ws: Worksheet object
-        label: Label text to search for
-        search_column: Column to search (default 1 = Column A)
-        start_row: Start searching from this row
-        end_row: Stop searching at this row
-    
-    Returns:
-        Row number if found, None otherwise
+    Find row number by searching for label in specified column.
+
+    Matching rules (to avoid label collisions like "Taxes" vs "Income Before Taxes"):
+      1) Exact match (case-insensitive) wins.
+      2) If no exact match, use a "best" contains-match (case-insensitive):
+         - prefer startswith(label)
+         - then prefer shortest cell text
+         - then prefer earliest row
+
+    Returns row number if found, else None.
     """
-    label_lower = label.lower().strip()
-    
+    label_lower = str(label).lower().strip()
+
+    exact_matches = []
+    contains_matches = []
+
     for row in range(start_row, end_row + 1):
         cell_value = ws.cell(row, search_column).value
-        if cell_value:
-            cell_lower = str(cell_value).lower().strip()
-            # Exact match or contains match
-            if label_lower == cell_lower or label_lower in cell_lower:
-                return row
-    
+        if not cell_value:
+            continue
+        cell_lower = str(cell_value).lower().strip()
+        if cell_lower == label_lower:
+            exact_matches.append(row)
+        elif label_lower in cell_lower:
+            # (startswith flag, length, row)
+            contains_matches.append((cell_lower.startswith(label_lower), len(cell_lower), row))
+
+    if exact_matches:
+        return exact_matches[0]
+
+    if contains_matches:
+        contains_matches.sort(key=lambda t: (not t[0], t[1], t[2]))
+        return contains_matches[0][2]
+
     return None
 
 
@@ -242,12 +255,16 @@ def calculate_financial_statements(df: pd.DataFrame,
         research_dev = sum_category('research_dev', 'debit')
         depreciation_expense = sum_category('depreciation_expense', 'debit')
         interest_expense = sum_category('interest_expense', 'debit')
-        tax_expense = sum_category('tax_expense', 'debit')  # optional; template can compute taxes
+        tax_expense = sum_category('tax_expense', 'debit')
 
         gross_profit = revenue - cogs
         total_opex = distribution_expenses + marketing_admin + research_dev + depreciation_expense
         ebit = gross_profit - total_opex
         ebt = ebit - interest_expense
+        # If GL has no explicit tax lines, estimate tax expense from a default effective tax rate.
+        if (tax_expense == 0 or pd.isna(tax_expense)) and ebt > 0:
+            tax_expense = float(ebt) * DEFAULT_TAX_RATE
+
         net_income = ebt - tax_expense
 
         # Balance Sheet (TB expected; GL will usually be 0)
