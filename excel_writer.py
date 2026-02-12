@@ -6,12 +6,13 @@ Never relies on hardcoded row numbers
 
 import openpyxl
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import numbers
+from openpyxl.styles import numbers, Font
 import pandas as pd
 from typing import Dict, List, Tuple, Optional
 import io
 from mapping import TEMPLATE_LABEL_MAPPING
 DEFAULT_TAX_RATE = 0.23  # used when GL has no explicit tax lines
+INPUT_BLUE = "1F4E79"  # hardcoded input color
 
 
 def find_row_by_label(ws, label: str, search_column: int = 1,
@@ -192,7 +193,15 @@ def write_financial_data_to_template(template_path: str,
             # Expenses should be positive
             # Revenues should be positive
             
-            ws.cell(row, col).value = scaled_value
+            cell = ws.cell(row, col)
+            cell.value = scaled_value
+            # Ensure hardcoded inputs are shown in blue (formulas remain black in template)
+            try:
+                cell.font = cell.font.copy(color=INPUT_BLUE)
+            except Exception:
+                cell.font = Font(color=INPUT_BLUE)
+            # Keep number format readable
+            cell.number_format = '#,##0'
             writes_performed.append(f'{template_label} ({year}): {scaled_value:.2f}')
     
     # Save to BytesIO
