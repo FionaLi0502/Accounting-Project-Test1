@@ -446,6 +446,14 @@ def apply_auto_fixes(df: pd.DataFrame,
         (fixed_df, change_log)
     """
     df = df.copy()
+    # Normalize headers and types once, so fixes don't crash on strings
+    df = normalize_column_headers(df)
+    if 'TxnDate' in df.columns:
+        df['TxnDate'] = pd.to_datetime(df['TxnDate'], errors='coerce')
+    for col in ['AccountNumber', 'Debit', 'Credit']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
     changes = []
     
     if 'remove_missing_dates' in selected_fixes:
@@ -479,7 +487,7 @@ def apply_auto_fixes(df: pd.DataFrame,
     
     if 'remove_future_dates' in selected_fixes:
         before = len(df)
-        df = df[df['TxnDate'] <= datetime.now()]
+        df = df[df['TxnDate'].notna() & (df['TxnDate'] <= datetime.now())]
         removed = before - len(df)
         if removed > 0:
             changes.append(f'Removed {removed} future-dated transactions')

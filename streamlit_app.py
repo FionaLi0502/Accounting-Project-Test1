@@ -3,11 +3,14 @@
 import streamlit as st
 import pandas as pd
 import openpyxl
+import io
+import zipfile
+import random
 
 from validation import validate_trial_balance, validate_gl_activity, apply_auto_fixes
 from mapping import map_accounts
 from excel_writer import write_financial_data_to_template, calculate_financial_statements, calculate_3statements_from_tb_gl
-from sample_data import load_sample_tb, load_sample_gl, load_random_backup_gl, load_random_backup_tb, get_template_path
+from sample_data import load_sample_tb, load_sample_gl, load_random_backup_gl, load_random_backup_tb, get_template_path, get_sample_data_path
 from pdf_export import create_pdf_report
 
 st.set_page_config(page_title="3-Statement Generator (v6)", layout="wide")
@@ -18,19 +21,65 @@ st.caption("Upload a Trial Balance (BS snapshot) and/or GL activity (IS activity
 ALL_AUTO_FIXES = ["fix_account_numbers", "remove_missing_dates", "remove_future_dates", "remove_duplicates", "map_unclassified"]
 
 with st.sidebar:
-    st.header("Demo data")
-    if st.button("Load Sample TB (BS-only)"):
-        st.session_state['tb_df'] = load_sample_tb()
-    if st.button("Load Sample GL (with TxnID)"):
-        st.session_state['gl_df'] = load_sample_gl(with_txnid=True)
-    if st.button("Load Random Backup TB (3 years)"):
-        df, name = load_random_backup_tb()
-        st.session_state['tb_df'] = df
-        st.session_state['tb_name'] = name
-    if st.button("Load Random Backup GL (3 years)"):
-        df, name = load_random_backup_gl()
-        st.session_state['gl_df'] = df
-        st.session_state['gl_name'] = name
+    st.header("Demo / downloads")
+
+    # 1) Download Sample Financial Model (Excel template)
+    try:
+        demo_template_path = get_template_path(template_type='demo')
+        with open(demo_template_path, "rb") as f:
+            st.download_button(
+                label="Download Sample Financial Model (Excel)",
+                data=f.read(),
+                file_name="Financial_Model_SAMPLE_DEMO_USD_thousands_GAAP.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+    except Exception as e:
+        st.warning(f"Template not found: {e}")
+
+    st.divider()
+
+    # 2) Load Random Sample Set (TB+GL together)
+    def _load_random_backup_set():
+        year_ranges = [(2020, 2022), (2021, 2023), (2022, 2024), (2023, 2025), (2024, 2026)]
+        y0, y1 = random.choice(year_ranges)
+        tb_file = f"backup_tb_{y0}_{y1}.csv"
+        gl_file = f"backup_gl_{y0}_{y1}_with_txnid.csv"
+        tb = pd.read_csv(get_sample_data_path(tb_file))
+        gl = pd.read_csv(get_sample_data_path(gl_file))
+        return tb, gl, tb_file, gl_file
+
+    if st.button("Load Random Sample Set (TB + GL, 3 years)"):
+        try:
+            tb, gl, tb_name, gl_name = _load_random_backup_set()
+            st.session_state["tb_df"] = tb
+            st.session_state["gl_df"] = gl
+            st.session_state["tb_name"] = tb_name
+            st.session_state["gl_name"] = gl_name
+            st.success(f"Loaded: {tb_name} + {gl_name}")
+        except Exception as e:
+            st.error(f"Could not load sample set: {e}")
+
+    # 3) Download Sample Dataset (the currently loaded TB+GL set)
+    tb_loaded = st.session_state.get("tb_df")
+    gl_loaded = st.session_state.get("gl_df")
+    if tb_loaded is not None and gl_loaded is not None:
+        tb_name = st.session_state.get("tb_name", "sample_tb.csv")
+        gl_name = st.session_state.get("gl_name", "sample_gl.csv")
+
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(tb_name, tb_loaded.to_csv(index=False))
+            zf.writestr(gl_name, gl_loaded.to_csv(index=False))
+        zip_buf.seek(0)
+
+        st.download_button(
+            label="Download Sample Dataset (TB + GL ZIP)",
+            data=zip_buf.getvalue(),
+            file_name="sample_dataset_TB_GL.zip",
+            mime="application/zip",
+        )
+    else:
+        st.info("Load a random sample set first to enable dataset download.")
 
     st.divider()
     st.header("Template")
@@ -85,15 +134,19 @@ def strict_category_check(mapped_df: pd.DataFrame, required: set, dataset_name: 
     return []
 
 if st.button("Generate 3-Statement Outputs", type="primary"):
-    if tb_df is None and gl_df is None:
-        st.error("Please upload at least one dataset (TB and/or GL).")
+    if tb_df is None or gl_df is None:
+        st.error("Please provide BOTH TB and GL as a set (upload both files, or click \"Load Random Sample Set\").")
         st.stop()
 
     # Auto-fix common issues
     if tb_df is not None:
-        tb_df = apply_auto_fixes(tb_df, selected_fixes=ALL_AUTO_FIXES)
+        tb_df, tb_changes = apply_auto_fixes(tb_df, selected_fixes=ALL_AUTO_FIXES)
+        if tb_changes:
+            st.info('TB auto-fixes applied: ' + '; '.join(tb_changes))
     if gl_df is not None:
-        gl_df = apply_auto_fixes(gl_df, selected_fixes=ALL_AUTO_FIXES)
+        gl_df, gl_changes = apply_auto_fixes(gl_df, selected_fixes=ALL_AUTO_FIXES)
+        if gl_changes:
+            st.info('GL auto-fixes applied: ' + '; '.join(gl_changes))
 
     # Validate basic structure
     issues = []
@@ -126,9 +179,7 @@ if st.button("Generate 3-Statement Outputs", type="primary"):
                 issues += [f"TB: Year0 opening check error: {str(e)}"]
 
         if issues:
-            st.error("Strict-mode checks failed:
-" + "
-".join(issues))
+            st.error("Strict-mode checks failed:\n" + "\n".join(issues))
             st.stop()
 
 
