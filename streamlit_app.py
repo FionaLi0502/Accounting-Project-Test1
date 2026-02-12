@@ -382,9 +382,7 @@ if st.button("Generate 3-Statement Outputs", type="primary"):
                 year0_issues = validate_year0_opening_snapshot(tb_df, statement_years=3)
 
             if year0_issues:
-                st.error("Strict mode: Year0 opening snapshot requirement failed:
-" + "
-".join(year0_issues))
+                st.error("Strict mode: Year0 opening snapshot requirement failed:\n" + "\n".join(year0_issues))
                 st.stop()
 
     # Map accounts
