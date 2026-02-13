@@ -33,6 +33,9 @@ from excel_writer import (
     compute_reconciliation_checks,
 )
 from sample_data import get_sample_data_path, get_template_path
+from pdf_export import generate_pdf_report
+from ai_summary import generate_ai_summary
+import os
 
 
 # ----------------------------
@@ -635,6 +638,63 @@ if st.button("Generate 3-Statement Outputs", type="primary"):
         file_name="3statement_output.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+    # ========================================
+    # AI Summary Generation
+    # ========================================
+    try:
+        # Get API key from Streamlit secrets or environment
+        api_key = None
+        try:
+            api_key = st.secrets.get("ANTHROPIC_API_KEY")
+        except:
+            api_key = os.environ.get("ANTHROPIC_API_KEY")
+        
+        # Determine data availability
+        has_balance_sheet = (tb_df is not None)
+        has_cash_flow = (tb_df is not None and len(financial_data) >= 2)
+        
+        # Generate summary
+        summary_text, used_ai = generate_ai_summary(
+            financial_data=financial_data,
+            has_balance_sheet=has_balance_sheet,
+            has_cash_flow=has_cash_flow,
+            api_key=api_key
+        )
+        
+        # Display summary
+        st.subheader("📊 AI Financial Summary")
+        if used_ai:
+            st.success("✅ Generated using Claude AI")
+        else:
+            st.info("ℹ️ Generated using rule-based analysis (AI unavailable)")
+        
+        st.markdown(summary_text)
+        
+    except Exception as e:
+        st.warning(f"Could not generate AI summary: {str(e)}")
+        summary_text = None
+    
+    # ========================================
+    # PDF Report Generation
+    # ========================================
+    try:
+        pdf_bytes = generate_pdf_report(
+            financial_data=financial_data,
+            summary_text=summary_text if summary_text else "Summary not available",
+            unit_scale=st.session_state.get("unit_scale", 1000)
+        )
+        
+        st.download_button(
+            "📄 Download PDF Report",
+            data=pdf_bytes,
+            file_name="financial_report.pdf",
+            mime="application/pdf",
+        )
+        
+    except Exception as e:
+        st.warning(f"Could not generate PDF: {str(e)}")
+
 
 # Persisted output preview / download (survives reruns)
 if st.session_state.get("last_excel_bytes"):
