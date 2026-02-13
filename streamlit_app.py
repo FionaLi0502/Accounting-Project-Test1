@@ -208,75 +208,88 @@ def _compute_template_preview_sections(financial_data: dict, template_path: str,
     label_to_key = TEMPLATE_LABEL_MAPPING
 
     # Build a section DataFrame from template row range
-    def build_df(row_start: int, row_end: int) -> pd.DataFrame:
-        labels = _extract_labels(ws, row_start, row_end)
-        data = {}
-        for y in stmt_years:
-            col = []
-            for lab in labels:
-                if lab == "":
-                    col.append(np.nan)
-                    continue
+    def build_df(start_row: int, end_row: int):
+        labels = _extract_labels(ws, start_row, end_row)
+        data_rows = []
+        for label in labels:
+            row_dict = {}
+            norm_label = label.strip()
 
+            # Fetch base value or derived value
+            key = label_to_key.get(norm_label)
+            if key:
+                # Base mapped key
+                for y in stmt_years:
+                    row_dict[f"FY{y}"] = v(y, key)
+            else:
+                # Derived or special row
+                if norm_label == "Gross Profit":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = gross_profit(y)
+                elif norm_label == "Total Operating Expenses":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = total_opex(y)
+                elif norm_label == "EBIT (Operating Profit)":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = ebit(y)
+                elif norm_label == "Income Before Taxes":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = ebt(y)
+                elif norm_label == "Net Income":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = net_income(y)
 
-                # Direct mapped inputs
-                if lab in label_to_key:
-                    col.append(v(y, label_to_key[lab]))
-                    continue
+                elif norm_label == "Total Current Assets":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = total_current_assets(y)
+                elif norm_label == "Property, Plant & Equipment - Net":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = net_ppe(y)
+                elif norm_label == "TOTAL ASSETS":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = total_assets(y)
+                elif norm_label == "Total Current Liabilities":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = total_current_liab(y)
+                elif norm_label == "Total Shareholders' Equity":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = total_equity(y)
+                elif norm_label == "TOTAL LIABILITIES AND EQUITY":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = total_le(y)
 
-                # Derived / totals
-                derived = {
-                    "Gross Profit": gross_profit,
-                    "EBIT (Operating Profit)": ebit,
-                    "Income Before Taxes": ebt,
-                    "Net Income": net_income,
-                    "Total Current Assets": total_current_assets,
-                    "Property Plant and Equipment - Net": net_ppe,
-                    "TOTAL ASSETS": total_assets,
-                    "Total Current Liabilities:": total_current_liab,
-                    "Total Shareholders' Equity": total_equity,
-                    "TOTAL LIABILITIES AND SHAREHOLDERS' EQUITY": total_le,
-                    "Net Cash Provided by Operating Activities": cfo,
-                    "Cash Flows from Investing Activities": cfi,
-                    "Cash Flows from Financing Activities": cff,
-                    "Increase/(Decrease) in Cash and Equivalents": net_change_cash,
-                    "Cash and Equivalents, Beginning of the Year": begin_cash,
-                    "Cash and Equivalents, End of the Year": end_cash,
-                    # Checks (these rows are outside the sections, but safe)
-                    "Balance Sheet Check (A - L + E)": bs_check,
-                    "Check": cf_check,
-                }
-                if lab in derived:
-                    col.append(float(derived[lab](y)))
-                    continue
-
-
-                # Headings / section labels should stay blank; unmapped numeric rows show 0 to avoid "missing statement" look
-                heading_labels = {
-                    "ASSETS", "LIABILITIES AND SHAREHOLDERS' EQUITY",
-                    "Current Assets:", "Non-Current Assets:", "Current Liabilities:",
-                    "Non-Current Liabilities:", "Shareholder's Equity:",
-                    "Cash Flow Statement", "Cash Flows from Operating Activities:",
-                    "Changes in Operating Assets and Liabilities:", "Investing Activities:",
-                    "Financing Activities:",
-                    "Revenues", "Operating Expenses", "Other Expense / (Income)", "Taxes",
-                }
-                is_heading = (lab in heading_labels) or (lab.endswith(":") and not lab.lower().startswith("total"))
-                # Some templates use ALL CAPS for section headers; do NOT treat totals as headings (handled above in derived).
-                is_heading = is_heading or (lab.upper() == lab and lab not in {"TOTAL ASSETS", "TOTAL LIABILITIES AND SHAREHOLDERS' EQUITY"})
-
-                if is_heading:
-                    col.append(np.nan)
+                elif norm_label == "Cash from Operating Activities":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = cfo(y)
+                elif norm_label == "Cash from Investing Activities":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = cfi(y)
+                elif norm_label == "Cash from Financing Activities":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = cff(y)
+                elif norm_label == "Net Change in Cash":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = net_change_cash(y)
+                elif norm_label == "Cash and Equivalents, Beginning of the Year":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = begin_cash(y)
+                elif norm_label == "Cash and Equivalents, End of the Year":
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = end_cash(y)
                 else:
-                    col.append(0.0)
+                    # Section headers and other unmapped rows → None
+                    for y in stmt_years:
+                        row_dict[f"FY{y}"] = None
 
-            data[f"FY{y}"] = col
+            row_dict[""] = label  # First column = label
+            data_rows.append(row_dict)
 
-        df = pd.DataFrame(data, index=labels)
-        return df
+        return pd.DataFrame(data_rows).set_index("")
 
-    # Find row ranges by labels (use the template's second 'Income Statement' section for actual output)
-    is_header = _find_row_exact(ws, "Income Statement", start_row=25, end_row=120)  # should find row 30
+    year0 = years_all[0] if years_all else None
+
+    # Locate sections using template row markers
+    is_header = _find_row_exact(ws, "Income Statement", start_row=1, end_row=100)
     is_start = _find_row_exact(ws, "Revenues", start_row=is_header or 1, end_row=140)
     is_end = _find_row_exact(ws, "Common Dividends", start_row=is_start or 1, end_row=160)
 
@@ -348,181 +361,152 @@ def load_random_set():
     st.session_state["gl_df"] = gl_df
     st.session_state["tb_name"] = tb_file
     st.session_state["gl_name"] = gl_file
-    st.session_state["tb_changes"] = []
-    st.session_state["gl_changes"] = []
     st.session_state["dataset_source"] = "random"
+    st.session_state["validation_tb"] = []
+    st.session_state["validation_gl"] = []
 
-    run_validation()
-
-
-def dataset_zip_bytes(tb_df: pd.DataFrame, gl_df: pd.DataFrame, tb_name: str, gl_name: str) -> bytes:
-    bio = io.BytesIO()
-    with zipfile.ZipFile(bio, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(tb_name or "tb.csv", tb_df.to_csv(index=False))
-        zf.writestr(gl_name or "gl.csv", gl_df.to_csv(index=False))
-    bio.seek(0)
-    return bio.read()
-
-
-# ----------------------------
-# Sidebar
-# ----------------------------
-with st.sidebar:
-    st.header("Demo")
-
-    # A1) Download sample financial model (demo template)
-    demo_template_path = get_template_path("demo")
-    try:
-        with open(demo_template_path, "rb") as f:
-            st.download_button(
-                "Download Sample Financial Model",
-                data=f.read(),
-                file_name="Financial_Model_SAMPLE_DEMO_USD_thousands_GAAP.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-    except Exception as e:
-        st.caption(f"Could not load demo template: {e}")
-
-    # A3) Load random sample set (TB+GL together)
-    if st.button("Load Random Sample Set (TB + GL, 3 years)"):
-        load_random_set()
-
-    # A2) Download current dataset (TB+GL zip)
-    if st.session_state["tb_df"] is not None and st.session_state["gl_df"] is not None:
-        zbytes = dataset_zip_bytes(
-            st.session_state["tb_df"],
-            st.session_state["gl_df"],
-            st.session_state["tb_name"] or "tb.csv",
-            st.session_state["gl_name"] or "gl.csv",
-        )
-        st.download_button(
-            "Download Sample Dataset (TB + GL)",
-            data=zbytes,
-            file_name="sample_dataset_tb_gl.zip",
-            mime="application/zip",
-        )
-    else:
-        st.caption("Load a dataset first to enable dataset download.")
-
-    st.divider()
-    st.header("Inputs")
-
-    tb_up = st.file_uploader("Upload TB (CSV)", type=["csv"], key="tb_uploader")
-    gl_up = st.file_uploader("Upload GL (CSV)", type=["csv"], key="gl_uploader")
-
-    if tb_up is not None:
-        st.session_state["tb_df"] = pd.read_csv(tb_up)
-        st.session_state["tb_name"] = getattr(tb_up, "name", "tb.csv")
-        st.session_state["tb_changes"] = []
-        st.session_state["dataset_source"] = "upload"
-        run_validation()
-
-    if gl_up is not None:
-        st.session_state["gl_df"] = pd.read_csv(gl_up)
-        st.session_state["gl_name"] = getattr(gl_up, "name", "gl.csv")
-        st.session_state["gl_changes"] = []
-        st.session_state["dataset_source"] = "upload"
-        run_validation()
-
-    st.divider()
-    st.header("Settings")
-
-    # Unit scale (you asked for 2-level, not free numeric)
-    unit_label = st.radio("Unit scale (divide by)", list(UNIT_SCALE_OPTIONS.keys()), index=1)
-    st.session_state["unit_scale"] = UNIT_SCALE_OPTIONS[unit_label]
-
-    st.session_state["strict_mode"] = st.checkbox("Strict mode", value=st.session_state["strict_mode"])
-
-    # Template type kept but tucked away (you said the picker isn't very useful)
-    with st.expander("Advanced: template selection"):
-        template_label = st.radio("Excel template", ["ZERO (processing)", "SAMPLE (demo)"], index=0)
-        st.session_state["template_type"] = "zero" if template_label.startswith("ZERO") else "demo"
-
-
-# ----------------------------
-# Main UI
-# ----------------------------
-st.title("AI Accounting Agent — GL → 3-Statement Demo")
 
 tb_df = st.session_state["tb_df"]
 gl_df = st.session_state["gl_df"]
 
-col1, col2 = st.columns(2)
-with col1:
-    st.subheader("Trial Balance (TB)")
-    if tb_df is None:
-        st.info("No TB loaded yet.")
-    else:
-        st.caption(f"Loaded: {st.session_state['tb_name']}")
-        st.dataframe(tb_df.head(20), use_container_width=True)
-
-with col2:
-    st.subheader("General Ledger (GL)")
-    if gl_df is None:
-        st.info("No GL loaded yet.")
-    else:
-        st.caption(f"Loaded: {st.session_state['gl_name']}")
-        st.dataframe(gl_df.head(20), use_container_width=True)
-
 
 # ----------------------------
-# Validation + auto-fix (this is the section you said must NOT disappear)
+# App Layout
 # ----------------------------
-tb_issues = st.session_state.get("validation_tb", []) or []
-gl_issues = st.session_state.get("validation_gl", []) or []
+st.title("AI Accounting Agent: 3-Statement Financial Model Generator")
+st.markdown("Upload Trial Balance and General Ledger data to auto-generate financial statements.")
 
-tb_counts = _count_by_severity(tb_issues)
-gl_counts = _count_by_severity(gl_issues)
+st.divider()
 
-banner_parts = []
+# ----------------------------
+# Demo Controls
+# ----------------------------
+st.header("Quick Start / Demo")
+
+demo_cols = st.columns(3)
+with demo_cols[0]:
+    # Download the sample financial model template (SAMPLE_DEMO template)
+    template_demo_path = get_template_path("demo")
+    with open(template_demo_path, "rb") as f:
+        st.download_button(
+            "📥 Download Sample Financial Model (Excel)",
+            data=f,
+            file_name="sample_financial_model.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+with demo_cols[1]:
+    # Download current TB + GL data as a .zip
+    if tb_df is not None or gl_df is not None:
+        bio = io.BytesIO()
+        with zipfile.ZipFile(bio, "w") as z:
+            if tb_df is not None:
+                tb_csv = tb_df.to_csv(index=False)
+                z.writestr(st.session_state.get("tb_name", "trial_balance.csv"), tb_csv)
+            if gl_df is not None:
+                gl_csv = gl_df.to_csv(index=False)
+                z.writestr(st.session_state.get("gl_name", "general_ledger.csv"), gl_csv)
+        st.download_button(
+            "📥 Download Current Dataset (TB+GL)",
+            data=bio.getvalue(),
+            file_name="dataset.zip",
+            mime="application/zip",
+        )
+    else:
+        st.caption("(Load TB/GL first to enable dataset download)")
+
+with demo_cols[2]:
+    if st.button("🎲 Load Random Sample Set (TB+GL)"):
+        load_random_set()
+        run_validation()
+        st.success("Loaded a random TB+GL matched set.")
+
+st.divider()
+
+# ----------------------------
+# Upload Files
+# ----------------------------
+st.header("Upload Files")
+
+st.markdown("**Upload Trial Balance and General Ledger files** (both required as a set for generation).")
+
+col_tb, col_gl = st.columns(2)
+with col_tb:
+    tb_up = st.file_uploader("Trial Balance (CSV)", type="csv", key="tb_uploader")
+    if tb_up:
+        st.session_state["tb_df"] = pd.read_csv(tb_up)
+        st.session_state["tb_name"] = tb_up.name
+        st.session_state["dataset_source"] = "upload"
+        run_validation()
+
+with col_gl:
+    gl_up = st.file_uploader("General Ledger (CSV)", type="csv", key="gl_uploader")
+    if gl_up:
+        st.session_state["gl_df"] = pd.read_csv(gl_up)
+        st.session_state["gl_name"] = gl_up.name
+        st.session_state["dataset_source"] = "upload"
+        run_validation()
+
+# Show loaded file summary
 if tb_df is not None:
-    banner_parts.append(f"TB [Critical]: {tb_counts.get('Critical',0)} [Warning]: {tb_counts.get('Warning',0)} [Info]: {tb_counts.get('Info',0)}")
+    st.caption(f"**TB:** {st.session_state.get('tb_name')} ({len(tb_df)} rows)")
 if gl_df is not None:
-    banner_parts.append(f"GL [Critical]: {gl_counts.get('Critical',0)} [Warning]: {gl_counts.get('Warning',0)} [Info]: {gl_counts.get('Info',0)}")
+    st.caption(f"**GL:** {st.session_state.get('gl_name')} ({len(gl_df)} rows)")
 
-if banner_parts:
-    st.warning("Validation issues found: " + " | ".join(banner_parts))
+st.divider()
 
-with st.expander("Validation details", expanded=True):
-    # TB
-    st.markdown("### Trial Balance (TB)")
-    if tb_df is None:
-        st.caption("No TB loaded.")
-    elif not tb_issues:
-        st.success("No TB validation issues.")
-    else:
-        st.dataframe(_issues_to_table(tb_issues), use_container_width=True)
-        for idx, it in enumerate(tb_issues[:20], start=1):
-            with st.expander(f"TB Issue {idx}: {it.get('issue','')}"):
-                st.markdown(f"**Severity:** {it.get('severity','')}  |  **Category:** {it.get('category','')}")
-                if it.get("impact"): st.markdown(f"**Impact:** {it.get('impact')}")
-                if it.get("suggestion"): st.markdown(f"**Suggestion:** {it.get('suggestion')}")
-                if it.get("auto_fix"): st.markdown(f"**Auto-fix option:** `{it.get('auto_fix')}`")
-                if "sample_data" in it and it["sample_data"] is not None:
-                    st.dataframe(it["sample_data"], use_container_width=True)
+# ----------------------------
+# Settings
+# ----------------------------
+st.header("Settings")
 
-    st.divider()
+col_set1, col_set2, col_set3 = st.columns(3)
+with col_set1:
+    unit_choice = st.selectbox("Unit Scale", options=list(UNIT_SCALE_OPTIONS.keys()), index=1)
+    st.session_state["unit_scale"] = UNIT_SCALE_OPTIONS[unit_choice]
+with col_set2:
+    strict = st.checkbox("Strict Mode (fail on Critical issues)", value=st.session_state["strict_mode"])
+    st.session_state["strict_mode"] = strict
+with col_set3:
+    tpl = st.radio("Template Type", options=["zero", "demo"], index=0, horizontal=True)
+    st.session_state["template_type"] = tpl
 
-    # GL
-    st.markdown("### General Ledger (GL)")
-    if gl_df is None:
-        st.caption("No GL loaded.")
-    elif not gl_issues:
-        st.success("No GL validation issues.")
-    else:
-        st.dataframe(_issues_to_table(gl_issues), use_container_width=True)
-        for idx, it in enumerate(gl_issues[:20], start=1):
-            with st.expander(f"GL Issue {idx}: {it.get('issue','')}"):
-                st.markdown(f"**Severity:** {it.get('severity','')}  |  **Category:** {it.get('category','')}")
-                if it.get("impact"): st.markdown(f"**Impact:** {it.get('impact')}")
-                if it.get("suggestion"): st.markdown(f"**Suggestion:** {it.get('suggestion')}")
-                if it.get("auto_fix"): st.markdown(f"**Auto-fix option:** `{it.get('auto_fix')}`")
-                if "sample_data" in it and it["sample_data"] is not None:
-                    st.dataframe(it["sample_data"], use_container_width=True)
+st.divider()
 
-    st.divider()
+# ----------------------------
+# Validation Section (always visible and detailed)
+# ----------------------------
+st.header("Validation")
 
-    # Auto-fix controls (accept/reject)
+if tb_df is not None or gl_df is not None:
+    tb_issues = st.session_state["validation_tb"]
+    gl_issues = st.session_state["validation_gl"]
+
+    # Severity counts
+    tb_counts = _count_by_severity(tb_issues)
+    gl_counts = _count_by_severity(gl_issues)
+
+    # Show summary metrics
+    st.markdown("### Validation Results")
+    col_sum1, col_sum2 = st.columns(2)
+    with col_sum1:
+        st.markdown("**Trial Balance**")
+        st.caption(f"🔴 Critical: {tb_counts['Critical']} | 🟡 Warning: {tb_counts['Warning']} | ℹ️ Info: {tb_counts['Info']}")
+    with col_sum2:
+        st.markdown("**General Ledger**")
+        st.caption(f"🔴 Critical: {gl_counts['Critical']} | 🟡 Warning: {gl_counts['Warning']} | ℹ️ Info: {gl_counts['Info']}")
+
+    # Detailed issues table
+    if tb_issues or gl_issues:
+        with st.expander("View Detailed Validation Issues", expanded=False):
+            if tb_issues:
+                st.markdown("#### Trial Balance Issues")
+                st.dataframe(_issues_to_table(tb_issues), use_container_width=True)
+            if gl_issues:
+                st.markdown("#### General Ledger Issues")
+                st.dataframe(_issues_to_table(gl_issues), use_container_width=True)
+
+    # Auto-fix controls
     st.markdown("### Auto-fix (accept/reject)")
     detected_fixes = sorted({it.get("auto_fix") for it in (tb_issues + gl_issues) if it.get("auto_fix")})
     if not detected_fixes:
@@ -617,7 +601,7 @@ if st.button("Generate 3-Statement Outputs", type="primary"):
         unit_scale=float(st.session_state["unit_scale"]),
     )
 
-    # Persist output so Streamlit reruns don’t lose it
+    # Persist output so Streamlit reruns don't lose it
     st.session_state["last_excel_bytes"] = out_bytes.getvalue()
 
     # Build a template-matching preview (Income Statement / Balance Sheet / Cash Flow)
@@ -638,6 +622,37 @@ if st.button("Generate 3-Statement Outputs", type="primary"):
         file_name="3statement_output.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+    # ========================================
+    # 3-Statement Preview (moved here from bottom)
+    # ========================================
+    if st.session_state.get("preview_sections"):
+        st.subheader("3-Statement Output Preview (Template-Matching)")
+
+        sections = st.session_state["preview_sections"]
+        tab_names = [k for k in ["Income Statement", "Balance Sheet", "Cash Flow Statement", "Checks"] if k in sections]
+        if tab_names:
+            tabs = st.tabs(tab_names)
+            for tname, tab in zip(tab_names, tabs):
+                with tab:
+                    df = sections.get(tname)
+                    if df is None or (hasattr(df, "empty") and df.empty):
+                        st.info("No preview data available for this section.")
+                    else:
+                        # Clean display: Streamlit shows Python None as 'None' which is misleading for section headers.
+                        # For website preview only: show blanks for headers and 0 for unmapped numeric rows (already 0 in df).
+                        df_show = df.copy()
+                        df_show = df_show.replace({None: np.nan})
+
+                        def _fmt_cell(x):
+                            if pd.isna(x):
+                                return ""
+                            if isinstance(x, (int, float, np.integer, np.floating)):
+                                return f"{float(x):,.0f}"
+                            return str(x)
+
+                        df_show = df_show.applymap(_fmt_cell)
+                        st.dataframe(df_show, use_container_width=True)
 
     # ========================================
     # AI Summary Generation
@@ -705,31 +720,3 @@ if st.session_state.get("last_excel_bytes"):
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="download_last_excel",
     )
-
-if st.session_state.get("preview_sections"):
-    st.subheader("3-Statement Output Preview (Template-Matching)")
-
-    sections = st.session_state["preview_sections"]
-    tab_names = [k for k in ["Income Statement", "Balance Sheet", "Cash Flow Statement", "Checks"] if k in sections]
-    if tab_names:
-        tabs = st.tabs(tab_names)
-        for tname, tab in zip(tab_names, tabs):
-            with tab:
-                df = sections.get(tname)
-                if df is None or (hasattr(df, "empty") and df.empty):
-                    st.info("No preview data available for this section.")
-                else:
-                    # Clean display: Streamlit shows Python None as 'None' which is misleading for section headers.
-                    # For website preview only: show blanks for headers and 0 for unmapped numeric rows (already 0 in df).
-                    df_show = df.copy()
-                    df_show = df_show.replace({None: np.nan})
-
-                    def _fmt_cell(x):
-                        if pd.isna(x):
-                            return ""
-                        if isinstance(x, (int, float, np.integer, np.floating)):
-                            return f"{float(x):,.0f}"
-                        return str(x)
-
-                    df_show = df_show.applymap(_fmt_cell)
-                    st.dataframe(df_show, use_container_width=True)
