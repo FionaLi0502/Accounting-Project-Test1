@@ -535,9 +535,9 @@ Net Cash Change = CFO + CFI + CFF
 
 ## 📚 Additional Resources
 
-- **[SAMPLE_DATASET_REQUIREMENTS.md](docs/SAMPLE_DATASET_REQUIREMENTS.md)**: Technical guide for creating compliant datasets
-- **[CHANGELOG.md](docs/CHANGELOG.md)**: Complete version history and bug fixes
-- **[Template Documentation](assets/templates/README.md)**: Excel template structure and formulas
+- **[SAMPLE_DATASET_REQUIREMENTS.md](SAMPLE_DATASET_REQUIREMENTS.md)**: Technical guide for creating compliant datasets
+- **[CHANGELOG.md](CHANGELOG.md)**: Complete version history and bug fixes (if you have this file)
+- **[Template Documentation](assets/templates/)**: Excel templates
 
 ---
 
